@@ -25,7 +25,7 @@ class _iLocIndexer:
             iterator = reversed(iterator)
             key = abs(key) - 1
 
-        value = next(islice(iterator, key, None), None)
-        if not value:
+        if value := next(islice(iterator, key, None), None):
+            return value
+        else:
             raise IndexError("OrderedDict index out of range")
-        return value
