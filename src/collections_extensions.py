@@ -7,6 +7,8 @@ _VT = TypeVar("_VT")
 
 
 class OrderedDict(OD[_KT, _VT]):
+    """OrderedDict with iLoc functionality.
+    """
 
     def __init__(self, *args, **kwargs) -> None:
         self.iloc: _iLocIndexer[_KT, _VT] = _iLocIndexer(self)
