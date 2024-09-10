@@ -11,24 +11,32 @@ from selenium.webdriver.support.expected_conditions import (
     invisibility_of_element,
 )
 from selenium.webdriver.common.by import By
-from selenium.webdriver import Firefox, Chrome
+from selenium.webdriver import (
+    Firefox,
+    FirefoxOptions,
+    FirefoxProfile,
+    Chrome,
+    ChromeOptions,
+)
 from selenium.common.exceptions import (
     WebDriverException,
     TimeoutException as SeleniumTimeout,
 )
 from asyncio import sleep as sleep_async
-from nomotools.logger import Logger
+from logger import Logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
+from typing import Any
+
 
 class _SeleniumExtended:
-    def __init__(self) -> None:
+    def __init__(self, **kwargs) -> None:
         if not any((isinstance(self, Firefox), isinstance(self, Chrome))):
             raise ImportError(
                 "SeleniumExtended can only act as a superclass \
                 for instances of webdriver.Firefox or webdriver.Chrome. \
                 To inherit from SeleniumExtended, make sure to also inherit \
-                from one of tose two classes."
+                from one of those two classes."
             )
         self.logger = Logger.get_logger(__name__, dirname(__file__))
         self.waits = {}
@@ -61,8 +69,7 @@ class _SeleniumExtended:
     async def get_elem_xp_tree(
         self, xpath: str, wait: int = 1, timeout: int | None = None, a_sync: bool = True
     ) -> list:
-        if timeout:
-            t1 = time()
+        t1 = time()
         while not (elem := (self.get_xp_tree()).xpath(xpath)):
             if timeout and (time() - t1 >= timeout):
                 raise SeleniumTimeout
@@ -105,15 +112,67 @@ class _SeleniumExtended:
                     except SeleniumTimeout as f:
                         if j == retries - 1:
                             raise f
-                        
-class SeleniumExtendedFirefox(Firefox,_SeleniumExtended):
-    
-    def __init__(self, **kwargs) -> None:
-        Firefox.__init__(self,**kwargs)
+
+
+class SeleniumExtendedFirefox(Firefox, _SeleniumExtended):
+
+    def __init__(
+        self,
+        headless: bool = False,
+        user_agent: str | None = None,
+        firefox_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        if firefox_kwargs is None:
+            firefox_kwargs = {}
+
+        if "options" in firefox_kwargs:
+            options = firefox_kwargs["options"]
+        else:
+            options = FirefoxOptions()
+
+        if headless and "-headless" not in options.arguments:
+            options.add_argument("-headless")
+
+        if user_agent is not None:
+            if options.profile is None:
+                profile = FirefoxProfile()
+                options.profile = profile
+            options.profile.set_preference("general.useragent.override", user_agent)
+
+        firefox_kwargs["options"] = options
+
+        Firefox.__init__(self, **firefox_kwargs)
         _SeleniumExtended.__init__(self)
 
-class SeleniumExtendedChrome(Chrome,_SeleniumExtended):
-    
-    def __init__(self, **kwargs) -> None:
-        Chrome.__init__(self,**kwargs)
+
+class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
+
+    def __init__(
+        self,
+        headless: bool = False,
+        user_agent: str | None = None,
+        chrome_kwargs: dict | None = None,
+    ) -> None:
+        if chrome_kwargs is None:
+            chrome_kwargs = {}
+        if "options" in chrome_kwargs:
+            options = chrome_kwargs["options"]
+        else:
+            options = ChromeOptions()
+        if headless:
+            if hl_index := next(
+                i for i, v in enumerate(options.arguments) if v.startswith("--headless")
+            ):
+                options.arguments.pop(hl_index)
+            options.add_argument("--headless=new")
+        if user_agent is not None:
+            if ua_index := next(
+                i
+                for i, v in enumerate(options.arguments)
+                if v.startswith("--user-agent")
+            ):
+                options.arguments.pop(ua_index)
+            options.add_argument(f"--user-agent={user_agent}")
+        chrome_kwargs["options"] = options
+        Chrome.__init__(self, **chrome_kwargs)
         _SeleniumExtended.__init__(self)
