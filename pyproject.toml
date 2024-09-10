@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomopytools"
-version = "0.0.1"
+version = "0.0.2"
 authors = [{ name = "Tilman Hornung", email = "mail@tilmanhornung.de" }]
 description = "Small tools, scripts and modules to extend and simplify programming with python."
 keywords = ["tools"]
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = ["loguru"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -60,6 +61,7 @@ selenium = ["selenium>=3.8","lxml"]
 mongodb = ["pymongo"]
 mail = ["aiosmtplib"]
 web = ["aiohttp","lxml"]
+torch = ["torch"]
 all = ["selenium>=3.8","lxml","pymongo","aiosmtplib","aiohttp"]
 
 

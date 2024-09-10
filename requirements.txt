@@ -3,3 +3,4 @@ lxml
 pymongo
 aiosmtplib
 aiohttp
+torch
