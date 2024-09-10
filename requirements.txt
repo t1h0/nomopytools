@@ -1,0 +1,5 @@
+selenium>=3.8
+lxml
+pymongo
+aiosmtplib
+aiohttp

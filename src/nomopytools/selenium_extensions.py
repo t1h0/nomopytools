@@ -46,7 +46,7 @@ class _SeleniumExtended:
             text=self.page_source, parser=etreeHTMLParser(remove_comments=True)
         )
 
-    async def get_xp_tree_soup(self):
+    def get_xp_tree_soup(self):
         return lxmlsoup(self.page_source)
 
     def get_elem_xp(self, xpath: str, timeout: int = 10):

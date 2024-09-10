@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nomopytools"
+version = "0.0.1"
+authors = [{ name = "Tilman Hornung", email = "mail@tilmanhornung.de" }]
+description = "Small tools, scripts and modules to extend and simplify programming with python."
+keywords = ["tools"]
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Other Audience",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft",
+    "Operating System :: Microsoft :: MS-DOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Operating System :: POSIX :: BSD",
+    "Operating System :: POSIX :: BSD :: FreeBSD",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: POSIX :: SunOS/Solaris",
+    "Operating System :: Unix",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Desktop Environment",
+    "Topic :: Education",
+    "Topic :: Education :: Testing",
+    "Topic :: Home Automation",
+    "Topic :: Other/Nonlisted Topic",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+
+[project.optional-dependencies]
+selenium = ["selenium>=3.8","lxml"]
+mongodb = ["pymongo"]
+mail = ["aiosmtplib"]
+web = ["aiohttp","lxml"]
+all = ["selenium>=3.8","lxml","pymongo","aiosmtplib","aiohttp"]
+
+
+[project.urls]
+changelog = "https://github.com/t1h0/nomopytools/releases"
+issues = "https://github.com/t1h0/nomopytools/issues"
+homepage = "https://github.com/t1h0/nomopytools"
+repository = "https://github.com/t1h0/nomopytools"
