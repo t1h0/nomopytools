@@ -23,7 +23,7 @@ from selenium.common.exceptions import (
     TimeoutException as SeleniumTimeout,
 )
 from asyncio import sleep as sleep_async
-from logger import Logger
+import warnings
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
 from typing import Any
@@ -38,7 +38,6 @@ class _SeleniumExtended:
                 To inherit from SeleniumExtended, make sure to also inherit \
                 from one of those two classes."
             )
-        self.logger = Logger.get_logger(__name__, dirname(__file__))
         self.waits = {}
 
     def get_xp_tree(self) -> etreeElement:
@@ -87,7 +86,7 @@ class _SeleniumExtended:
                 self.get(url)
                 return
             except WebDriverException:
-                self.logger.warning(
+                warnings.warn(
                     f"Couldn't get {url}. Waiting {sleep} seconds for try #{r+1}/{retries}"
                 )
                 if a_sync:
