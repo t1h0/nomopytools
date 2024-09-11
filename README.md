@@ -1,8 +1,15 @@
 # NomoPyTools #
 
-Small tools, scripts and modules to extend and simplify programming with python.
+Tools and modules I frequently use for machine learning, web scraping, and more.
 
-## Roadmap
+## Content
 
-* Add docstrings
-* Make a proper python package
+* **ml** (machine learning)
+* **selenium_extensions** (Webdriver extensions for Selenium)
+* **collections_extensions** (extensions for Python's collections)
+* **func** (small tools)
+* **mailing** (communication with mail servers)
+* **mongodb** (communication with MongoDB databases)
+* **str** (tools for string objects)
+* **web** (mostly requests extensions)
+* **xpath** (custom xpath functions)
