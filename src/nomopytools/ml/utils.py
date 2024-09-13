@@ -1,7 +1,8 @@
 import torch
 from torch.utils.data import TensorDataset, random_split, DataLoader, RandomSampler
 from loguru import logger
-from collections.abc import Sequence, Hashable
+from collections.abc import Sequence, Hashable, Iterable
+from itertools import islice
 from .containers import DataSplit
 from typing import Any, TypeVar
 
@@ -19,7 +20,9 @@ else:
     logger.info("No GPU available, using the CPU instead.")
     Device = torch.device("cpu")
 
-TensorContainer = TypeVar("TensorContainer", dict[Any, Any], Sequence[Any], torch.Tensor)
+TensorContainer = TypeVar(
+    "TensorContainer", dict[Any, Any], Sequence[Any], torch.Tensor
+)
 
 
 def to_device(cont: TensorContainer) -> TensorContainer:
@@ -107,3 +110,27 @@ def convert_labels(*labels: Sequence[Hashable]) -> torch.Tensor:
         out = torch.Tensor(out).transpose(0, 1)
 
     return out.to(torch.int64)
+
+
+IterYield = TypeVar("IterYield")
+
+
+def batched(iterable: Iterable[IterYield], n: int):
+    """Adaptation of itertools.batched (python >=3.12)
+
+    Args:
+        iterable (Iterable[IterYield]): Iterable to batch.
+        n (int): Batch size.
+
+    Raises:
+        ValueError: If batch size < 1.
+
+    Yields:
+        list[IterYield,...]: The batches.
+    """
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError("n must be at least one")
+    iterator = iter(iterable)
+    while batch := list(islice(iterator, n)):
+        yield batch

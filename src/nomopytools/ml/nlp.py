@@ -8,8 +8,9 @@ from sklearn.metrics import matthews_corrcoef, f1_score
 from tqdm import tqdm
 from collections.abc import Sequence, Hashable
 from typing import Literal
+import math
 from .containers import ForwardSplitInput, DataSplit
-from .utils import convert_labels
+from .utils import convert_labels, batched
 from .transformer import Transformer, BaseAutoModel, logger
 
 
@@ -49,12 +50,16 @@ class TextTransformer(Transformer):
         )
 
     def tokenize(
-        self, samples: str | Sequence[str], max_length: int | None = None
+        self,
+        samples: str | list[str],
+        batch_size: int = 1024,
+        max_length: int | None = None,
     ) -> tuple[ForwardSplitInput, ForwardSplitInput]:
         """Tokenize samples using the respective model's tokenizer.
 
         Args:
-            samples (str | Sequence[str]): Sample(s) to tokenize.
+            samples (str | list[str]): Sample(s) to tokenize.
+            batch_size (int, optional): Batch size. Defaults to 1024.
             max_length (int | None, optional): Max length to pad.
                 Defaults to None (max length of model).
 
@@ -68,9 +73,14 @@ class TextTransformer(Transformer):
         input_ids = []
         attention_mask = []
 
-        for sample in samples:
+        for batch in tqdm(
+            batched(samples, batch_size),
+            desc="Tokenize samples",
+            unit="batch",
+            total=math.ceil(len(samples) / batch_size),
+        ):
             encoded_dict = self.tokenizer(
-                sample,
+                batch,
                 add_special_tokens=True,
                 truncation=True,
                 max_length=max_length,
@@ -88,10 +98,11 @@ class TextTransformer(Transformer):
 
     def perform_training(
         self,
-        samples: Sequence[str],
+        samples: list[str],
         forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput],
         forward_kwargs: dict | None = None,
-        batch_size: int = 32,
+        tokenization_batch_size: int = 1024,
+        train_batch_size: int = 32,
         train_size: float = 0.8,
         val_size: float = 0.1,
         test_size: float = 0.1,
@@ -102,13 +113,15 @@ class TextTransformer(Transformer):
         """Trains the classifier.
 
         Args:
-            samples (Sequence[str]): Samples (untokenized).
+            samples (list[str]): Samples (untokenized).
             forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput]):
                 Additional ForwardSplitInput tuple(s) that will be train-validation-test
                  split and passed to forward call.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-            batch_size (int, optional): Batch size. Defaults to 32.
+            tokenization_batch_size (int, optional): Batch size for tokenization.
+                Defaults to 1024.
+            train_batch_size (int, optional): Batch size for training. Defaults to 32.
             train_size (float, optional): Train set size (as proportion).
                 Defaults to 0.8.
             val_size (float, optional): Validation set size (as proportion).
@@ -124,12 +137,12 @@ class TextTransformer(Transformer):
             forward_inputs = (forward_inputs,)
 
         # tokenize
-        input_ids_mask = self.tokenize(samples)
+        input_ids_mask = self.tokenize(samples, batch_size=tokenization_batch_size)
 
         return super().perform_training(
             forward_inputs=(*input_ids_mask, *forward_inputs),
             forward_kwargs=forward_kwargs,
-            batch_size=batch_size,
+            batch_size=train_batch_size,
             train_size=train_size,
             val_size=val_size,
             test_size=test_size,
@@ -177,11 +190,12 @@ class SequenceClassifier(TextTransformer):
 
     def perform_training(
         self,
-        samples: Sequence[str],
+        samples: list[str],
         *labels: Sequence[Hashable],
         forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput] | None = None,
         forward_kwargs: dict | None = None,
-        batch_size: int = 32,
+        tokenization_batch_size: int = 1024,
+        train_batch_size: int = 32,
         train_size: float = 0.8,
         val_size: float = 0.1,
         test_size: float = 0.1,
@@ -190,7 +204,7 @@ class SequenceClassifier(TextTransformer):
         """Trains the classifier.
 
         Args:
-            samples (Sequence[str]): Samples (untokenized).
+            samples (list[str]): Samples (untokenized).
             *labels (Sequence[Hashable]): One sequence of labels per task.
             forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput] | None,
                 optional): Additional ForwardSplitInput tuple(s) that will be
@@ -198,7 +212,9 @@ class SequenceClassifier(TextTransformer):
                 Defaults to None.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-            batch_size (int, optional): Batch size. Defaults to 32.
+            tokenization_batch_size (int, optional): Batch size for tokenization.
+                Defaults to 1024.
+            train_batch_size (int, optional): Batch size for training. Defaults to 32.
             train_size (float, optional): Train set size (as proportion).
                 Defaults to 0.8.
             val_size (float, optional): Validation set size (as proportion).
@@ -229,7 +245,8 @@ class SequenceClassifier(TextTransformer):
             samples=samples,
             forward_inputs=(input_labels, *forward_inputs),
             forward_kwargs=forward_kwargs,
-            batch_size=batch_size,
+            tokenization_batch_size=tokenization_batch_size,
+            train_batch_size=train_batch_size,
             train_size=train_size,
             val_size=val_size,
             test_size=test_size,
@@ -282,4 +299,3 @@ class SequenceClassifier(TextTransformer):
 
             logger.info(f"test f1 score: {f1}")
             logger.info(f"test MCC: {mcc}")
-
