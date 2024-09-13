@@ -8,9 +8,9 @@ from sklearn.metrics import matthews_corrcoef, f1_score
 from tqdm import tqdm
 from collections.abc import Sequence, Hashable
 from typing import Literal
-from containers import ForwardSplitInput, DataSplit
-from utils import convert_labels
-from nomopytools.ml.transformer import Transformer, BaseAutoModel, logger
+from .containers import ForwardSplitInput, DataSplit
+from .utils import convert_labels
+from .transformer import Transformer, BaseAutoModel, logger
 
 
 class TextTransformer(Transformer):

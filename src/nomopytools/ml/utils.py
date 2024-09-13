@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import TensorDataset, random_split, DataLoader, RandomSampler
 from loguru import logger
 from collections.abc import Sequence, Hashable
-from containers import DataSplit
+from .containers import DataSplit
 from typing import Any, TypeVar
 
 # Device inspection

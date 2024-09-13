@@ -13,8 +13,8 @@ from tqdm import tqdm
 import numpy as np
 from collections.abc import Sequence
 from typing import Literal
-from utils import train_validation_test_split, Device, to_device
-from containers import DataSplit, ForwardSplitInput
+from .utils import train_validation_test_split, Device, to_device
+from .containers import DataSplit, ForwardSplitInput
 
 # logger setup
 from loguru import logger

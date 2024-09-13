@@ -1,2 +1,2 @@
-from transformer import Transformer
-from nlp import TextTransformer, SequenceClassifier
+from .transformer import Transformer
+from .nlp import TextTransformer, SequenceClassifier
