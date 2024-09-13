@@ -62,7 +62,7 @@ mongodb = ["pymongo"]
 mail = ["aiosmtplib"]
 web = ["aiohttp","lxml"]
 ml = ["torch", "transformers","tqdm","numpy", "loguru", "scikit-learn"]
-all = ["selenium>=3.8","lxml","pymongo","aiosmtplib","aiohttp"]
+all = ["selenium>=3.8","lxml","pymongo","aiosmtplib","aiohttp","torch", "transformers","tqdm","numpy", "loguru", "scikit-learn"]
 
 
 [project.urls]
