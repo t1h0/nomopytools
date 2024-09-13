@@ -24,7 +24,7 @@ class TextTransformer(Transformer):
         *args,
         **kwargs,
     ) -> None:
-        """Template for a Transformer model.
+        """Template for a Text Transformer model.
 
         Args:
             model_name (str): The model to use.
@@ -148,7 +148,7 @@ class SequenceClassifier(TextTransformer):
         *args,
         **kwargs,
     ) -> None:
-        """Template for a Transformer model.
+        """Template for a Sequence Classifier model.
 
         Args:
             model_name (str): The model to use.
