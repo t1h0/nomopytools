@@ -61,7 +61,7 @@ selenium = ["selenium>=3.8","lxml"]
 mongodb = ["pymongo"]
 mail = ["aiosmtplib"]
 web = ["aiohttp","lxml"]
-torch = ["torch"]
+ml = ["torch", "transformers","tqdm","numpy", "loguru", "scikit-learn"]
 all = ["selenium>=3.8","lxml","pymongo","aiosmtplib","aiohttp"]
 
 
