@@ -3,8 +3,9 @@ from torch.utils.data import TensorDataset, random_split, DataLoader, RandomSamp
 from loguru import logger
 from collections.abc import Sequence, Hashable, Iterable
 from itertools import islice
+from bidict import bidict
 from .containers import DataSplit
-from typing import Any, TypeVar
+from typing import Any, TypeVar, overload
 
 # Device inspection
 if torch.cuda.is_available():
@@ -91,29 +92,52 @@ def train_validation_test_split(
     )
 
 
-def convert_labels(*labels: Sequence[Hashable]) -> torch.Tensor:
+@overload
+def convert_labels(
+    *labels: Sequence[Hashable],
+) -> tuple[tuple[bidict[int, Hashable], ...], torch.Tensor]: ...
+
+
+@overload
+def convert_labels() -> None: ...
+
+
+def convert_labels(
+    *labels: Sequence[Hashable],
+) -> tuple[tuple[bidict[int, Hashable], ...], torch.Tensor] | None:
     """Convert labels into a vector ready for loss computation.
 
+    Args:
+        *labels (Sequence[Hashable]): One sequence of labels per task.
+
     Returns:
-        torch.Tensor: The converted labels.
+        tuple[bidict[int, Hashable], ...] , torch.Tensor: Tuple of one bidict
+            for index <> label per input label sequence and the converted labels.
     """
-    out = []
+    if not labels:
+        return None
+
+    out_bidicts = []
+    out_tensors = []
 
     for label_set in labels:
         # mapping: label -> index
-        label_to_index = {label: index for index, label in enumerate({*label_set})}
+        label_to_index = bidict(
+            {index: label for index, label in enumerate({*label_set})}
+        )
 
         # convert: label -> index
-        indices = [label_to_index[label] for label in label_set]
+        indices = [label_to_index.inverse[label] for label in label_set]
 
-        out.append(indices)
+        out_bidicts.append(label_to_index)
+        out_tensors.append(indices)
 
-    if len(out) == 1:
-        out = torch.Tensor(out[0])
+    if len(out_tensors) == 1:
+        out_tensors = torch.Tensor(out_tensors[0])
     else:
-        out = torch.Tensor(out).transpose(0, 1)
+        out_tensors = torch.Tensor(out_tensors).transpose(0, 1)
 
-    return out.to(torch.int64)
+    return tuple(out_bidicts), out_tensors.to(torch.int64)
 
 
 IterYield = TypeVar("IterYield")

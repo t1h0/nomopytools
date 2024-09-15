@@ -4,3 +4,9 @@ pymongo
 aiosmtplib
 aiohttp
 torch
+transformers
+tqdm
+numpy
+loguru
+scikit-learn
+bidict
