@@ -30,6 +30,7 @@ class Transformer(nn.Module):
         model_name: str,
         model_kwargs: dict | None = None,
         auto_model_class: type[BaseAutoModel] = AutoModel,
+        device: torch.device | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -42,19 +43,24 @@ class Transformer(nn.Module):
             auto_model_class (type[BaseAutoModel], optional): AutoModel class
                 to use for loading the model (e.g. AutoModelForSequenceClassification).
                 Defaults to AutoModel.
+            device (torch.device | None, optional): Torch device to use. If None, will
+                select GPU if possible, else CPU. Defaults to None.
             *args, **kwargs: To pass to nn.Module.
         """
         super().__init__(*args, **kwargs)
         self.model = auto_model_class.from_pretrained(
             model_name, **(model_kwargs or {})
         )
-        self.to(Device)
+        self.device = device or Device
+        self.to(self.device)
 
     def forward(self, *args, **kwargs) -> ModelOutput:
         # to make things easier, we'll always return a ModelOutput
         kwargs["return_dict"] = True
 
-        return self.model(*to_device(args), **to_device(kwargs))
+        return self.model(
+            *to_device(args, self.device), **to_device(kwargs, self.device)
+        )
 
     def infer(self, *args, **kwargs) -> ModelOutput:
         self.eval()

@@ -22,6 +22,7 @@ class TextTransformer(Transformer):
         model_kwargs: dict | None = None,
         tokenizer_kwargs: dict | None = None,
         auto_model_class: type[BaseAutoModel] = AutoModelForTextEncoding,
+        device: torch.device | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -36,17 +37,20 @@ class TextTransformer(Transformer):
             auto_model_class (type[BaseAutoModel], optional): AutoModel class to use for
                 loading the model (e.g. AutoModelForSequenceClassification).
                 Defaults to AutoModelForTextEncoding.
+            device (torch.device | None, optional): Torch device to use. If None, will
+                select GPU if possible, else CPU. Defaults to None.
             *args, **kwargs: To pass to nn.Module.
         """
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name, **(tokenizer_kwargs or {})
+        )
         super().__init__(
             model_name=model_name,
             model_kwargs=model_kwargs,
             auto_model_class=auto_model_class,
+            device=device,
             *args,
             **kwargs,
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, **(tokenizer_kwargs or {})
         )
 
     def tokenize(
@@ -158,6 +162,7 @@ class SequenceClassifier(TextTransformer):
         model_kwargs: dict | None = None,
         tokenizer_kwargs: dict | None = None,
         auto_model_class: type[BaseAutoModel] = AutoModelForSequenceClassification,
+        device: torch.device | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -172,17 +177,18 @@ class SequenceClassifier(TextTransformer):
             auto_model_class (type[BaseAutoModel], optional): AutoModel class to use for
                 loading the model (e.g. AutoModelForSequenceClassification).
                 Defaults to AutoModelForSequenceClassification.
+            device (torch.device | None, optional): Torch device to use. If None, will
+                select GPU if possible, else CPU. Defaults to None.
             *args, **kwargs: To pass to nn.Module.
         """
         super().__init__(
             model_name=model_name,
             model_kwargs=model_kwargs,
+            tokenizer_kwargs=tokenizer_kwargs,
             auto_model_class=auto_model_class,
+            device=device,
             *args,
             **kwargs,
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, **(tokenizer_kwargs or {})
         )
 
     def predict(self, *args, **kwargs) -> torch.Tensor:

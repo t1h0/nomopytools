@@ -25,24 +25,28 @@ TensorContainer = TypeVar(
 )
 
 
-def to_device(cont: TensorContainer) -> TensorContainer:
+def to_device(
+    cont: TensorContainer, device: torch.device | None = None
+) -> TensorContainer:
     """Transfers a Tensor or all tensor inside a list or inside a dictionary to Device.
 
     Args:
         cont (TensorContainer): A dictionary, list or torch.Tensor.
+        device (torch.device | None, optional): Torch device to use. If None, will
+            select GPU if possible, else CPU. Defaults to None.
 
     Returns:
         TensorContainer: The input with all containing Tensors transferred to Device.
     """
-
+    device = device or Device
     if isinstance(cont, Sequence):
-        return [to_device(s) for s in cont]
+        return [to_device(s, device) for s in cont]
 
     elif isinstance(cont, torch.Tensor):
-        return cont.to(Device)
+        return cont.to(device)
 
     elif isinstance(cont, dict):
-        return {k: to_device(v) for k, v in cont.items()}
+        return {k: to_device(v, device) for k, v in cont.items()}
 
     else:
         return cont
