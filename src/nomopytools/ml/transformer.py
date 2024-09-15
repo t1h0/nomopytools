@@ -128,7 +128,7 @@ class Transformer(nn.Module):
         ):
             logger.info(f"=== Epoch {epoch} ===")
             self.train_epoch(
-                data.test,
+                data.train,
                 model_input_keys,
                 optimizer,
                 lr_scheduler,
