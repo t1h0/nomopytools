@@ -5,6 +5,7 @@ from transformers import (
     AutoModelForTextEncoding,
     AutoModelForSequenceClassification,
 )
+from transformers.modeling_outputs import SequenceClassifierOutput
 from sklearn.metrics import matthews_corrcoef, f1_score
 from tqdm import tqdm
 from bidict import bidict
@@ -136,9 +137,12 @@ class SequenceClassifier(TextTransformer):
             *args,
             **kwargs,
         )
+        
+    def infer(self, *args, **kwargs) -> SequenceClassifierOutput:
+        return super().infer(*args, **kwargs)
 
     def predict(self, *args, **kwargs) -> torch.Tensor:
-        return self.infer(*args, **kwargs).logits.argmax(1)
+        return self.infer(*args, **kwargs).logits.softmax(-1)
 
     def get_model_inputs(
         self,
@@ -167,26 +171,31 @@ class SequenceClassifier(TextTransformer):
         )
         index_to_label, converted_labels = convert_labels(*labels)
 
-        return index_to_label, input_ids_masks | {"labels": converted_labels}
+        return input_ids_masks | {"labels": converted_labels}, index_to_label
 
-    def test_epoch(
+    def eval_epoch(
         self,
         data: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        eval_type: str = "evaluation",
     ) -> None:
-        """Tests one epoch.
+        """Evaluates one epoch using loss as metric.
 
         Args:
-            data (DataLoader): The data to test on.
+            data (DataLoader): The data to evaluate on.
             data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
                 to pass it to forward call with.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
+            eval_type (str, optional): The type of evaluation (for logging).
+                Defaults to "evaluation".
         """
+        self.eval()
+
         for batch in tqdm(
             data,
-            desc="Batch test",
+            desc=f"Batch {eval_type}",
             unit="batch",
             position=1,
             leave=False,
@@ -197,6 +206,7 @@ class SequenceClassifier(TextTransformer):
                     **dict(zip(data_keys, batch)),
                     **(forward_kwargs or {}),
                 )
+                .argmax()
                 .detach()
                 .cpu()
             )

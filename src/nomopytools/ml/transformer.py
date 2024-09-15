@@ -11,7 +11,6 @@ from transformers import (
 from transformers.models.auto.auto_factory import _BaseAutoModelClass as BaseAutoModel
 from transformers.utils.generic import ModelOutput
 from tqdm import tqdm
-import numpy as np
 from collections.abc import Sequence
 from .utils import train_validation_test_split, Device, to_device
 
@@ -62,6 +61,11 @@ class Transformer(nn.Module):
         )
 
     def infer(self, *args, **kwargs) -> ModelOutput:
+        """Model inference. Forward passes args and kwargs without gradient computation.
+
+        Returns:
+            ModelOutput: The output.
+        """
         self.eval()
 
         with torch.no_grad():
@@ -264,7 +268,6 @@ class Transformer(nn.Module):
         """
 
         total_loss = 0
-        total_accuracy = 0
 
         self.eval()
 
@@ -283,23 +286,8 @@ class Transformer(nn.Module):
                 )
 
             loss = output.loss
-            logits = output.logits
 
             # Accumulate the validation loss.
             total_loss += loss.item()
 
-            # Calculate the accuracy for this batch of test sentences, and
-            # accumulate it over all batches.
-            total_accuracy += self._flat_accuracy(
-                logits.detach().cpu().numpy(), batch[2].numpy()
-            )
-
         logger.info("{0} loss: {1:.2f}".format(eval_type, total_loss / len(data)))
-        logger.info(
-            "{0} accuracy: {1:.2f}".format(eval_type, total_accuracy / len(data))
-        )
-
-    def _flat_accuracy(self, preds, labels) -> float:
-        pred_flat = np.argmax(preds, axis=1).flatten()
-        labels_flat = labels.flatten()
-        return np.sum(pred_flat == labels_flat) / len(labels_flat)
