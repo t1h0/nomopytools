@@ -268,31 +268,23 @@ class SequenceClassifier(TextTransformer):
             epochs=epochs,
         )
 
-    def eval_epoch(
+    def test_epoch(
         self,
-        eval_type: Literal["validation", "test"],
-        data: DataSplit,
+        data: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
     ) -> None:
-        """Evaluates one epoch.
+        """Tests one epoch.
 
         Args:
-            eval_type ("validation" | "test"): The type of evaluation and subsequently
-                the dataset to use.
-            data (DataSplit): Train, validation and test sets.
-            data_keys (Sequence[str]): Keys of each data Tensor to pass it
-                to forward call with.
+            data (DataLoader): The data to test on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-
         """
-
-        if eval_type == "validation":
-            return super().eval_epoch(eval_type, data, data_keys, forward_kwargs)
-
         for batch in tqdm(
-            data.test,
+            data,
             desc="Batch test",
             unit="batch",
             position=1,

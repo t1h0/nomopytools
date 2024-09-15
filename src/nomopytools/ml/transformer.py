@@ -131,20 +131,20 @@ class Transformer(nn.Module):
         ):
             logger.info(f"=== Epoch {epoch} ===")
             self.train_epoch(
-                data,
                 forward_data_keys,
+                data.test,
                 optimizer,
                 lr_scheduler,
                 forward_kwargs,
             )
-            self.eval_epoch("validation", data, forward_data_keys, forward_kwargs)
-            self.eval_epoch("test", data, forward_data_keys, forward_kwargs)
+            self.validate_epoch(data.val, model_input_keys, forward_kwargs)
+            self.test_epoch(data.test, model_input_keys, forward_kwargs)
 
         logger.info("Training complete!")
 
     def train_epoch(
         self,
-        data: DataSplit,
+        data: DataLoader,
         data_keys: Sequence[str],
         optimizer: Optimizer,
         lr_scheduler: LRScheduler,
@@ -153,9 +153,9 @@ class Transformer(nn.Module):
         """Trains one epoch.
 
         Args:
-            data (DataSplit): Train, validation and test sets.
-            data_keys (Sequence[str]): Keys of each data Tensor to pass it
-                to forward call with.
+            data (DataLoader): The data to train on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
             optimizer (Optimizer): The optimizer to use.
             lr_scheduler (LRScheduler): The learning rate scheduler to use.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
@@ -168,7 +168,7 @@ class Transformer(nn.Module):
         self.train()
 
         for batch in tqdm(
-            data.train,
+            data,
             position=1,
             desc="Batch training",
             unit="batch",
@@ -201,28 +201,69 @@ class Transformer(nn.Module):
             # update learning rate
             lr_scheduler.step()
 
-        logger.info(
-            "average training loss: {0:.2f}".format(total_loss / len(data.train))
+        logger.info("average training loss: {0:.2f}".format(total_loss / len(data)))
+
+    def validate_epoch(
+        self,
+        data: DataLoader,
+        data_keys: Sequence[str],
+        forward_kwargs: dict | None = None,
+    ) -> None:
+        """Validates one epoch.
+
+        Args:
+            data (DataLoader): The data to validate on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+        """
+        return self.eval_epoch(
+            data=data,
+            data_keys=data_keys,
+            forward_kwargs=forward_kwargs,
+            eval_type="validation",
+        )
+
+    def test_epoch(
+        self,
+        data: DataLoader,
+        data_keys: Sequence[str],
+        forward_kwargs: dict | None = None,
+    ) -> None:
+        """Tests one epoch.
+
+        Args:
+            data (DataLoader): The data to test on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+        """
+        return self.eval_epoch(
+            data=data,
+            data_keys=data_keys,
+            forward_kwargs=forward_kwargs,
+            eval_type="test",
         )
 
     def eval_epoch(
         self,
-        eval_type: Literal["validation", "test"],
-        data: DataSplit,
+        data: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        eval_type: str = "evaluation",
     ) -> None:
-        """Evaluates one epoch.
+        """Evaluates one epoch using loss as metric.
 
         Args:
-            eval_type ("validation" | "test"): The type of evaluation and subsequently
-                the dataset to use.
-            data (DataSplit): Train, validation and test sets.
-            data_keys (Sequence[str]): Keys of each data Tensor to pass it
-                to forward call with.
+            data (DataLoader): The data to evaluate on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-
+            eval_type (str, optional): The type of evaluation (for logging).
+                Defaults to "evaluation".
         """
 
         total_loss = 0
@@ -231,7 +272,7 @@ class Transformer(nn.Module):
         self.eval()
 
         for batch in tqdm(
-            data.test if eval_type == "test" else data.val,
+            data,
             desc=f"Batch {eval_type}",
             unit="batch",
             position=1,
@@ -256,9 +297,9 @@ class Transformer(nn.Module):
                 logits.detach().cpu().numpy(), batch[2].numpy()
             )
 
-        logger.info("{0} loss: {1:.2f}".format(eval_type, total_loss / len(data.val)))
+        logger.info("{0} loss: {1:.2f}".format(eval_type, total_loss / len(data)))
         logger.info(
-            "{0} accuracy: {1:.2f}".format(eval_type, total_accuracy / len(data.val))
+            "{0} accuracy: {1:.2f}".format(eval_type, total_accuracy / len(data))
         )
 
     def _flat_accuracy(self, preds, labels) -> float:
