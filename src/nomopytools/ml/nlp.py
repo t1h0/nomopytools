@@ -7,9 +7,10 @@ from transformers import (
 )
 from sklearn.metrics import matthews_corrcoef, f1_score
 from tqdm import tqdm
+from bidict import bidict
 from collections.abc import Sequence, Hashable
 import math
-from .utils import convert_labels, batched
+from .utils import batched, convert_labels
 from .transformer import Transformer, BaseAutoModel, logger
 
 
@@ -98,63 +99,6 @@ class TextTransformer(Transformer):
             "attention_mask": torch.cat(attention_mask, dim=0),
         }
 
-    def perform_training(
-        self,
-        samples: list[str] | None = None,
-        model_input: dict[str, torch.Tensor] | None = None,
-        forward_kwargs: dict | None = None,
-        tokenization_batch_size: int = 1024,
-        train_batch_size: int = 32,
-        train_size: float = 0.8,
-        val_size: float = 0.1,
-        test_size: float = 0.1,
-        epochs: int = 4,
-        *args,
-        **kwargs,
-    ) -> None:
-        """Trains the classifier.
-
-        Args:
-            samples (list[str] | None, optional): Samples (untokenized). Defaults to None.
-            forward_inputs (dict[str,torch.Tensor] | None, optional): Additional input
-                tensors that will be train-validation-test split and passed to
-                forward call with the respective keys from the dictionary.
-                Defaults to None.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-            tokenization_batch_size (int, optional): Batch size for tokenization.
-                Defaults to 1024.
-            train_batch_size (int, optional): Batch size for training. Defaults to 32.
-            train_size (float, optional): Train set size (as proportion).
-                Defaults to 0.8.
-            val_size (float, optional): Validation set size (as proportion).
-                Defaults to 0.1.
-            test_size (float, optional): Test set size (as proportion).
-                Defaults to 0.1.
-            epochs (int, optional): Number of epochs to run. Defaults to 4.
-
-        Raises:
-            ValueError: _description_
-        """
-        if model_input is None:
-            model_input = {}
-
-        if samples is not None:
-            # tokenize
-            model_input = (
-                self.tokenize(samples, batch_size=tokenization_batch_size) | model_input
-            )
-
-        return super().perform_training(
-            model_input=model_input,
-            forward_kwargs=forward_kwargs,
-            batch_size=train_batch_size,
-            train_size=train_size,
-            val_size=val_size,
-            test_size=test_size,
-            epochs=epochs,
-        )
-
 
 class SequenceClassifier(TextTransformer):
 
@@ -196,70 +140,34 @@ class SequenceClassifier(TextTransformer):
     def predict(self, *args, **kwargs) -> torch.Tensor:
         return self.infer(*args, **kwargs).logits.argmax(1)
 
-    def perform_training(
+    def get_model_inputs(
         self,
-        samples: list[str] | None = None,
+        samples: str | list[str],
         *labels: Sequence[Hashable],
-        model_input: dict[str, torch.Tensor] | None = None,
-        forward_kwargs: dict | None = None,
-        tokenization_batch_size: int = 1024,
-        train_batch_size: int = 32,
-        train_size: float = 0.8,
-        val_size: float = 0.1,
-        test_size: float = 0.1,
-        epochs: int = 4,
-    ) -> None:
-        """Trains the classifier.
+        tokenize_batch_size: int = 1024,
+        max_length: int | None = None,
+    ) -> tuple[dict[str, torch.Tensor], tuple[bidict[int, Hashable], ...]]:
+        """Get model inputs for sequence classification.
 
         Args:
-            samples (list[str] | None, optional): Samples (untokenized). Defaults to None.
+            samples (str | list[str]): Samples to tokenize.
             *labels (Sequence[Hashable]): One sequence of labels per task.
-            forward_inputs (dict[str,torch.Tensor] | None, optional): Additional input
-                tensors that will be train-validation-test split and passed to
-                forward call with the respective keys from the dictionary.
-                Defaults to None.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-            tokenization_batch_size (int, optional): Batch size for tokenization.
+            tokenize_batch_size (int, optional): Batch size for tokenization.
                 Defaults to 1024.
-            train_batch_size (int, optional): Batch size for training. Defaults to 32.
-            train_size (float, optional): Train set size (as proportion).
-                Defaults to 0.8.
-            val_size (float, optional): Validation set size (as proportion).
-                Defaults to 0.1.
-            test_size (float, optional): Test set size (as proportion).
-                Defaults to 0.1.
-            epochs (int, optional): Number of epochs to run. Defaults to 4.
-
-        Raises:
-            ValueError: If labels per task are not equal on length or are not matching
-                number of samples.
+            max_length (int | None, optional): Max length to pad.
+                Defaults to None (max length of model).
+        Returns:
+            tuple[dict[str, torch.Tensor], tuple[bidict[int, Hashable], ...]]: Model
+                inputs and a tuple of one bidict index<>label for each label sequence.
         """
-        if model_input is None:
-            model_input = {}
-
-        if labels:
-            if samples is not None and (
-                len({len(task_labels) for task_labels in labels}) != 1
-                or len(labels[0]) != len(samples)
-            ):
-                raise ValueError(
-                    "Each sequence of labels must have as many labels as there are samples."
-                )
-            # convert labels
-            model_input = {"labels": convert_labels(*labels)} | model_input
-
-        return super().perform_training(
+        input_ids_masks = self.tokenize(
             samples=samples,
-            model_input=model_input,
-            forward_kwargs=forward_kwargs,
-            tokenization_batch_size=tokenization_batch_size,
-            train_batch_size=train_batch_size,
-            train_size=train_size,
-            val_size=val_size,
-            test_size=test_size,
-            epochs=epochs,
+            batch_size=tokenize_batch_size,
+            max_length=max_length,
         )
+        index_to_label, converted_labels = convert_labels(*labels)
+
+        return index_to_label, input_ids_masks | {"labels": converted_labels}
 
     def test_epoch(
         self,
