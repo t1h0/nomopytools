@@ -102,8 +102,8 @@ class TextTransformer(Transformer):
 
     def perform_training(
         self,
-        samples: list[str],
-        forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput],
+        samples: list[str] | None = None,
+        forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput] | None = None,
         forward_kwargs: dict | None = None,
         tokenization_batch_size: int = 1024,
         train_batch_size: int = 32,
@@ -117,10 +117,10 @@ class TextTransformer(Transformer):
         """Trains the classifier.
 
         Args:
-            samples (list[str]): Samples (untokenized).
-            forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput]):
-                Additional ForwardSplitInput tuple(s) that will be train-validation-test
-                 split and passed to forward call.
+            samples (list[str] | None, optional): Samples (untokenized). Defaults to None.
+            forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput]
+                | None, optional): Additional ForwardSplitInput tuple(s) that will be
+                train-validation-test split and passed to forward call. Defaults to None.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
             tokenization_batch_size (int, optional): Batch size for tokenization.
@@ -139,12 +139,16 @@ class TextTransformer(Transformer):
         """
         if isinstance(forward_inputs, ForwardSplitInput):
             forward_inputs = (forward_inputs,)
+        elif forward_inputs is None:
+            forward_inputs = ()
 
-        # tokenize
-        input_ids_mask = self.tokenize(samples, batch_size=tokenization_batch_size)
+        if samples is not None:
+            # tokenize
+            input_ids_mask = self.tokenize(samples, batch_size=tokenization_batch_size)
+            forward_inputs = (*input_ids_mask, *forward_inputs)
 
         return super().perform_training(
-            forward_inputs=(*input_ids_mask, *forward_inputs),
+            forward_inputs=forward_inputs,
             forward_kwargs=forward_kwargs,
             batch_size=train_batch_size,
             train_size=train_size,
@@ -196,7 +200,7 @@ class SequenceClassifier(TextTransformer):
 
     def perform_training(
         self,
-        samples: list[str],
+        samples: list[str] | None = None,
         *labels: Sequence[Hashable],
         forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput] | None = None,
         forward_kwargs: dict | None = None,
@@ -210,7 +214,7 @@ class SequenceClassifier(TextTransformer):
         """Trains the classifier.
 
         Args:
-            samples (list[str]): Samples (untokenized).
+            samples (list[str] | None, optional): Samples (untokenized). Defaults to None.
             *labels (Sequence[Hashable]): One sequence of labels per task.
             forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput] | None,
                 optional): Additional ForwardSplitInput tuple(s) that will be
@@ -230,26 +234,31 @@ class SequenceClassifier(TextTransformer):
             epochs (int, optional): Number of epochs to run. Defaults to 4.
 
         Raises:
-            ValueError: _description_
+            ValueError: If labels per task are not equal on length or are not matching
+                number of samples.
         """
-        if len({len(task_labels) for task_labels in labels}) != 1 or len(
-            labels[0]
-        ) != len(samples):
-            raise ValueError(
-                "Each sequence of labels must have as many labels as there are samples."
-            )
-
         if isinstance(forward_inputs, ForwardSplitInput):
             forward_inputs = (forward_inputs,)
         elif forward_inputs is None:
             forward_inputs = ()
 
-        # convert labels
-        input_labels = ForwardSplitInput("labels", convert_labels(*labels))
+        if labels:
+            if samples is not None and (
+                len({len(task_labels) for task_labels in labels}) != 1
+                or len(labels[0]) != len(samples)
+            ):
+                raise ValueError(
+                    "Each sequence of labels must have as many labels as there are samples."
+                )
+            # convert labels
+            forward_inputs = (
+                ForwardSplitInput("labels", convert_labels(*labels)),
+                *forward_inputs,
+            )
 
         return super().perform_training(
             samples=samples,
-            forward_inputs=(input_labels, *forward_inputs),
+            forward_inputs=forward_inputs,
             forward_kwargs=forward_kwargs,
             tokenization_batch_size=tokenization_batch_size,
             train_batch_size=train_batch_size,
