@@ -3,6 +3,7 @@ from torch import nn
 from torch.optim.optimizer import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.adamw import AdamW
+from torch.utils.data import DataLoader
 from transformers import (
     AutoModel,
     get_linear_schedule_with_warmup,
@@ -12,9 +13,7 @@ from transformers.utils.generic import ModelOutput
 from tqdm import tqdm
 import numpy as np
 from collections.abc import Sequence
-from typing import Literal
 from .utils import train_validation_test_split, Device, to_device
-from .containers import DataSplit, ForwardSplitInput
 
 # logger setup
 from loguru import logger
@@ -70,7 +69,7 @@ class Transformer(nn.Module):
 
     def perform_training(
         self,
-        forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput],
+        model_input: dict[str, torch.Tensor],
         forward_kwargs: dict | None = None,
         batch_size: int = 32,
         train_size: float = 0.8,
@@ -83,9 +82,9 @@ class Transformer(nn.Module):
         """Trains the classifier.
 
         Args:
-            forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput]):
-                ForwardSplitInput tuple(s) that will be train-validation-test split and
-                passed to forward call. E.g. input_ids and attention_mask.
+            model_input (dict[str,torch.Tensor]): Model inputs that will be
+                train-validation-test split and passed to forward call with the
+                respective keys from the dictionary. E.g. input_ids and attention_mask.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
             batch_size (int, optional): Batch size. Defaults to 32.
@@ -97,14 +96,9 @@ class Transformer(nn.Module):
                 Defaults to 0.1.
             epochs (int, optional): Number of epochs to run. Defaults to 4.
         """
-        if isinstance(forward_inputs, ForwardSplitInput):
-            forward_inputs = (forward_inputs,)
-        # get forward data keys
-        forward_data_keys = tuple(inp.key for inp in forward_inputs)
-
         # get dataloaders
         data = train_validation_test_split(
-            *(inp.tensor for inp in forward_inputs),
+            *model_input.values(),
             batch_size=batch_size,
             train_size=train_size,
             val_size=val_size,
@@ -124,6 +118,9 @@ class Transformer(nn.Module):
             num_training_steps=len(data.train) * epochs,
         )
 
+        # get forward_keys
+        model_input_keys = list(model_input.keys())
+
         # train
 
         for epoch in tqdm(
@@ -131,8 +128,8 @@ class Transformer(nn.Module):
         ):
             logger.info(f"=== Epoch {epoch} ===")
             self.train_epoch(
-                forward_data_keys,
                 data.test,
+                model_input_keys,
                 optimizer,
                 lr_scheduler,
                 forward_kwargs,

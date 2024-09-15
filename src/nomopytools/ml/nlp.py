@@ -1,4 +1,5 @@
 import torch
+from torch.utils.data import DataLoader
 from transformers import (
     AutoTokenizer,
     AutoModelForTextEncoding,
@@ -7,9 +8,7 @@ from transformers import (
 from sklearn.metrics import matthews_corrcoef, f1_score
 from tqdm import tqdm
 from collections.abc import Sequence, Hashable
-from typing import Literal
 import math
-from .containers import ForwardSplitInput, DataSplit
 from .utils import convert_labels, batched
 from .transformer import Transformer, BaseAutoModel, logger
 
@@ -58,7 +57,7 @@ class TextTransformer(Transformer):
         samples: str | list[str],
         batch_size: int = 1024,
         max_length: int | None = None,
-    ) -> tuple[ForwardSplitInput, ForwardSplitInput]:
+    ) -> dict[str, torch.Tensor]:
         """Tokenize samples using the respective model's tokenizer.
 
         Args:
@@ -68,8 +67,7 @@ class TextTransformer(Transformer):
                 Defaults to None (max length of model).
 
         Returns:
-            tuple[ForwardSplitInput,ForwardSplitInput]: input_ids and attention_mask as
-                ForwardSplitInput objects.
+            dict[str,torch.Tensor]: input_ids and attention_mask.
         """
         if isinstance(samples, str):
             samples = [samples]
@@ -95,15 +93,15 @@ class TextTransformer(Transformer):
             input_ids.append(encoded_dict["input_ids"])
             attention_mask.append(encoded_dict["attention_mask"])
 
-        return (
-            ForwardSplitInput("input_ids", torch.cat(input_ids, dim=0)),
-            ForwardSplitInput("attention_mask", torch.cat(attention_mask, dim=0)),
-        )
+        return {
+            "input_ids": torch.cat(input_ids, dim=0),
+            "attention_mask": torch.cat(attention_mask, dim=0),
+        }
 
     def perform_training(
         self,
         samples: list[str] | None = None,
-        forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput] | None = None,
+        model_input: dict[str, torch.Tensor] | None = None,
         forward_kwargs: dict | None = None,
         tokenization_batch_size: int = 1024,
         train_batch_size: int = 32,
@@ -118,9 +116,10 @@ class TextTransformer(Transformer):
 
         Args:
             samples (list[str] | None, optional): Samples (untokenized). Defaults to None.
-            forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput]
-                | None, optional): Additional ForwardSplitInput tuple(s) that will be
-                train-validation-test split and passed to forward call. Defaults to None.
+            forward_inputs (dict[str,torch.Tensor] | None, optional): Additional input
+                tensors that will be train-validation-test split and passed to
+                forward call with the respective keys from the dictionary.
+                Defaults to None.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
             tokenization_batch_size (int, optional): Batch size for tokenization.
@@ -137,18 +136,17 @@ class TextTransformer(Transformer):
         Raises:
             ValueError: _description_
         """
-        if isinstance(forward_inputs, ForwardSplitInput):
-            forward_inputs = (forward_inputs,)
-        elif forward_inputs is None:
-            forward_inputs = ()
+        if model_input is None:
+            model_input = {}
 
         if samples is not None:
             # tokenize
-            input_ids_mask = self.tokenize(samples, batch_size=tokenization_batch_size)
-            forward_inputs = (*input_ids_mask, *forward_inputs)
+            model_input = (
+                self.tokenize(samples, batch_size=tokenization_batch_size) | model_input
+            )
 
         return super().perform_training(
-            forward_inputs=forward_inputs,
+            model_input=model_input,
             forward_kwargs=forward_kwargs,
             batch_size=train_batch_size,
             train_size=train_size,
@@ -202,7 +200,7 @@ class SequenceClassifier(TextTransformer):
         self,
         samples: list[str] | None = None,
         *labels: Sequence[Hashable],
-        forward_inputs: ForwardSplitInput | Sequence[ForwardSplitInput] | None = None,
+        model_input: dict[str, torch.Tensor] | None = None,
         forward_kwargs: dict | None = None,
         tokenization_batch_size: int = 1024,
         train_batch_size: int = 32,
@@ -216,9 +214,9 @@ class SequenceClassifier(TextTransformer):
         Args:
             samples (list[str] | None, optional): Samples (untokenized). Defaults to None.
             *labels (Sequence[Hashable]): One sequence of labels per task.
-            forward_inputs (ForwardSplitInput | Sequence[ForwardSplitInput] | None,
-                optional): Additional ForwardSplitInput tuple(s) that will be
-                train-validation-test split and passed to forward call.
+            forward_inputs (dict[str,torch.Tensor] | None, optional): Additional input
+                tensors that will be train-validation-test split and passed to
+                forward call with the respective keys from the dictionary.
                 Defaults to None.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
@@ -237,10 +235,8 @@ class SequenceClassifier(TextTransformer):
             ValueError: If labels per task are not equal on length or are not matching
                 number of samples.
         """
-        if isinstance(forward_inputs, ForwardSplitInput):
-            forward_inputs = (forward_inputs,)
-        elif forward_inputs is None:
-            forward_inputs = ()
+        if model_input is None:
+            model_input = {}
 
         if labels:
             if samples is not None and (
@@ -251,14 +247,11 @@ class SequenceClassifier(TextTransformer):
                     "Each sequence of labels must have as many labels as there are samples."
                 )
             # convert labels
-            forward_inputs = (
-                ForwardSplitInput("labels", convert_labels(*labels)),
-                *forward_inputs,
-            )
+            model_input = {"labels": convert_labels(*labels)} | model_input
 
         return super().perform_training(
             samples=samples,
-            forward_inputs=forward_inputs,
+            model_input=model_input,
             forward_kwargs=forward_kwargs,
             tokenization_batch_size=tokenization_batch_size,
             train_batch_size=train_batch_size,
