@@ -24,13 +24,14 @@ class TextTransformer(Transformer):
         tokenizer_kwargs: dict | None = None,
         auto_model_class: type[BaseAutoModel] = AutoModelForTextEncoding,
         device: torch.device | None = None,
+        freeze_model: bool = False,
         *args,
         **kwargs,
     ) -> None:
         """Template for a Text Transformer model.
 
         Args:
-            model_name (str): The model to use.
+            model_name (str): The pretrained model to use.
             model_kwargs (dict | None, optional): kwargs to pass to the model.
                 Defaults to None.
             tokenizer_kwargs (dict | None, optional): kwargs to pass to the tokenizer.
@@ -40,6 +41,8 @@ class TextTransformer(Transformer):
                 Defaults to AutoModelForTextEncoding.
             device (torch.device | None, optional): Torch device to use. If None, will
                 select GPU if possible, else CPU. Defaults to None.
+            freeze_model (bool, optional): Whether to freeze the pretrained model
+                (e.g. for fine-tuning). Defaults to False.
             *args, **kwargs: To pass to nn.Module.
         """
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -50,6 +53,7 @@ class TextTransformer(Transformer):
             model_kwargs=model_kwargs,
             auto_model_class=auto_model_class,
             device=device,
+            freeze_model=freeze_model,
             *args,
             **kwargs,
         )
@@ -110,13 +114,14 @@ class SequenceClassifier(TextTransformer):
         tokenizer_kwargs: dict | None = None,
         auto_model_class: type[BaseAutoModel] = AutoModelForSequenceClassification,
         device: torch.device | None = None,
+        freeze_model: bool = False,
         *args,
         **kwargs,
     ) -> None:
         """Template for a Sequence Classifier model.
 
         Args:
-            model_name (str): The model to use.
+            model_name (str): The pretrained model to use.
             model_kwargs (dict | None, optional): kwargs to pass to the model.
                 Defaults to None.
             tokenizer_kwargs (dict | None, optional): kwargs to pass to the tokenizer.
@@ -126,6 +131,8 @@ class SequenceClassifier(TextTransformer):
                 Defaults to AutoModelForSequenceClassification.
             device (torch.device | None, optional): Torch device to use. If None, will
                 select GPU if possible, else CPU. Defaults to None.
+            freeze_model (bool, optional): Whether to freeze the pretrained model
+                (e.g. for fine-tuning). Defaults to False.
             *args, **kwargs: To pass to nn.Module.
         """
         super().__init__(
@@ -134,10 +141,11 @@ class SequenceClassifier(TextTransformer):
             tokenizer_kwargs=tokenizer_kwargs,
             auto_model_class=auto_model_class,
             device=device,
+            freeze_model=freeze_model,
             *args,
             **kwargs,
         )
-        
+
     def infer(self, *args, **kwargs) -> SequenceClassifierOutput:
         return super().infer(*args, **kwargs)
 

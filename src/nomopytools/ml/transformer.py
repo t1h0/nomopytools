@@ -29,13 +29,14 @@ class Transformer(nn.Module):
         model_kwargs: dict | None = None,
         auto_model_class: type[BaseAutoModel] = AutoModel,
         device: torch.device | None = None,
+        freeze_model: bool = False,
         *args,
         **kwargs,
     ) -> None:
         """Template for a Transformer model.
 
         Args:
-            model_name (str): The model to use.
+            model_name (str): The pretrained model to use.
             model_kwargs (dict | None, optional): kwargs to pass to the model.
                 Defaults to None.
             auto_model_class (type[BaseAutoModel], optional): AutoModel class
@@ -43,12 +44,17 @@ class Transformer(nn.Module):
                 Defaults to AutoModel.
             device (torch.device | None, optional): Torch device to use. If None, will
                 select GPU if possible, else CPU. Defaults to None.
+            freeze_model (bool, optional): Whether to freeze the pretrained model
+                (e.g. for fine-tuning). Defaults to False.
             *args, **kwargs: To pass to nn.Module.
         """
         super().__init__(*args, **kwargs)
         self.model = auto_model_class.from_pretrained(
             model_name, **(model_kwargs or {})
         )
+        if freeze_model:
+            for param in self.model.parameters():
+                param.requires_grad = False
         self.device = device or Device
         self.to(self.device)
 
