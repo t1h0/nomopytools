@@ -196,6 +196,7 @@ class SequenceClassifier(TextTransformer):
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
         eval_type: str = "evaluation",
+        epoch: int = 0,
     ) -> None:
         """Evaluates one epoch using loss as metric.
 
@@ -207,15 +208,21 @@ class SequenceClassifier(TextTransformer):
                 forward call. If None will pass no additional kwargs. Defaults to None.
             eval_type (str, optional): The type of evaluation (for logging).
                 Defaults to "evaluation".
+            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
         """
         self.eval()
 
-        for batch in tqdm(
-            data,
-            desc=f"Batch {eval_type}",
-            unit="batch",
-            position=1,
-            leave=False,
+        f1_total = 0
+        mcc_total = 0
+
+        for batch_idx, batch in enumerate(
+            tqdm(
+                data,
+                desc=f"Batch {eval_type}",
+                unit="batch",
+                position=1,
+                leave=False,
+            )
         ):
 
             prediction = (
@@ -229,10 +236,21 @@ class SequenceClassifier(TextTransformer):
             true_labels = batch[data_keys.index("labels")]
 
             f1 = f1_score(true_labels, prediction)
-            mcc = matthews_corrcoef(true_labels, prediction)
+            f1_total += f1
 
-            logger.info(f"test f1 score: {f1}")
-            logger.info(f"test MCC: {mcc}")
+            mcc = matthews_corrcoef(true_labels, prediction)
+            mcc_total += mcc
+
+            # visualize with tensorboard
+            self.tensorboard_writer.add_scalar(
+                f"{eval_type} f1", f1, epoch * len(data) + batch_idx
+            )
+            self.tensorboard_writer.add_scalar(
+                f"{eval_type} MCC", mcc, epoch * len(data) + batch_idx
+            )
+
+        logger.info(f"average {eval_type} f1 score: {round(f1_total/len(data),2)}")
+        logger.info(f"average {eval_type} MCC: {round(mcc_total/len(data),2)}")
 
 
 OutputHeadName = TypeVar("OutputHeadName", bound=str)
@@ -360,6 +378,7 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
         eval_type: str = "evaluation",
+        epoch: int = 0,
     ) -> None:
         """Evaluates one epoch using loss as metric.
 
@@ -371,17 +390,20 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
                 forward call. If None will pass no additional kwargs. Defaults to None.
             eval_type (str, optional): The type of evaluation (for logging).
                 Defaults to "evaluation".
+            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
         """
         self.eval()
 
-        f1 = 0
+        f1_total = 0
 
-        for batch in tqdm(
-            data,
-            desc=f"Batch {eval_type}",
-            unit="batch",
-            position=1,
-            leave=False,
+        for batch_idx, batch in enumerate(
+            tqdm(
+                data,
+                desc=f"Batch {eval_type}",
+                unit="batch",
+                position=1,
+                leave=False,
+            )
         ):
 
             prediction = self.predict(
@@ -405,11 +427,17 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
                 true_labels, list(self.heads.values())
             )
 
-            f1 += f1_score(
+            f1 = f1_score(
                 true_labels_one_hot,
                 prediction_one_hot,
                 average="weighted",
                 zero_division=0,
             )
+            f1_total += f1
 
-        logger.info(f"{eval_type} f1 score: {round(f1/len(data),2)}")
+            # visualize with tensorboard
+            self.tensorboard_writer.add_scalar(
+                f"{eval_type} f1", f1, epoch * len(data) + batch_idx
+            )
+
+        logger.info(f"average {eval_type} f1 score: {round(f1_total/len(data),2)}")

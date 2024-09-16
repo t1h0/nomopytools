@@ -10,3 +10,4 @@ numpy
 loguru
 scikit-learn
 bidict
+torch-tb-profiler

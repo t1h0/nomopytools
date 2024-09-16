@@ -61,7 +61,7 @@ selenium = ["selenium>=3.8", "lxml"]
 mongodb = ["pymongo"]
 mail = ["aiosmtplib"]
 web = ["aiohttp", "lxml"]
-ml = ["torch", "transformers", "tqdm", "numpy", "loguru", "scikit-learn", "bidict"]
+ml = ["torch", "transformers", "tqdm", "numpy", "loguru", "scikit-learn", "bidict","torch-tb-profiler", "tensorboard"]
 all = [
     "selenium>=3.8",
     "lxml",
@@ -74,7 +74,9 @@ all = [
     "numpy",
     "loguru",
     "scikit-learn",
-    "bidict"
+    "bidict",
+    "torch-tb-profiler",
+    "tensorboard"
 ]
 
 

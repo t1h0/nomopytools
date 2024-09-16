@@ -4,6 +4,7 @@ from torch.optim.optimizer import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.adamw import AdamW
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModel,
     get_linear_schedule_with_warmup,
@@ -57,6 +58,9 @@ class Transformer(nn.Module):
                 param.requires_grad = False
         self.device = device or Device
         self.to(self.device)
+
+        # for tensorboard visualization
+        self.tensorboard_writer = SummaryWriter()
 
     def forward(self, *args, **kwargs) -> ModelOutput:
         # to make things easier, we'll always return a ModelOutput
@@ -143,9 +147,10 @@ class Transformer(nn.Module):
                 optimizer,
                 lr_scheduler,
                 forward_kwargs,
+                epoch=epoch,
             )
-            self.validate_epoch(data.val, model_input_keys, forward_kwargs)
-            self.test_epoch(data.test, model_input_keys, forward_kwargs)
+            self.validate_epoch(data.val, model_input_keys, forward_kwargs, epoch=epoch)
+            self.test_epoch(data.test, model_input_keys, forward_kwargs, epoch=epoch)
 
         logger.info("Training complete!")
 
@@ -156,6 +161,7 @@ class Transformer(nn.Module):
         optimizer: Optimizer,
         lr_scheduler: LRScheduler,
         forward_kwargs: dict | None = None,
+        epoch: int = 0,
     ) -> None:
         """Trains one epoch.
 
@@ -167,6 +173,7 @@ class Transformer(nn.Module):
             lr_scheduler (LRScheduler): The learning rate scheduler to use.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
+            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
         """
 
         total_loss = 0
@@ -174,12 +181,14 @@ class Transformer(nn.Module):
         # set model to train mode
         self.train()
 
-        for batch in tqdm(
-            data,
-            position=1,
-            desc="Batch training",
-            unit="batch",
-            leave=False,
+        for batch_idx, batch in enumerate(
+            tqdm(
+                data,
+                position=1,
+                desc="Batch training",
+                unit="batch",
+                leave=False,
+            )
         ):
 
             # clear any previously calculated gradients
@@ -194,6 +203,11 @@ class Transformer(nn.Module):
             # get loss
             loss = output.loss
             total_loss += loss.item()
+
+            # log to tensorboard
+            self.tensorboard_writer.add_scalar(
+                "Training loss", loss.item(), epoch * len(data) + batch_idx
+            )
 
             # backward pass
             loss.backward()
@@ -215,6 +229,7 @@ class Transformer(nn.Module):
         data: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        epoch: int = 0,
     ) -> None:
         """Validates one epoch.
 
@@ -230,6 +245,7 @@ class Transformer(nn.Module):
             data_keys=data_keys,
             forward_kwargs=forward_kwargs,
             eval_type="validation",
+            epoch=epoch,
         )
 
     def test_epoch(
@@ -237,6 +253,7 @@ class Transformer(nn.Module):
         data: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        epoch: int = 0,
     ) -> None:
         """Tests one epoch.
 
@@ -246,12 +263,14 @@ class Transformer(nn.Module):
                 to pass it to forward call with.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
+            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
         """
         return self.eval_epoch(
             data=data,
             data_keys=data_keys,
             forward_kwargs=forward_kwargs,
             eval_type="test",
+            epoch=epoch,
         )
 
     def eval_epoch(
@@ -260,6 +279,7 @@ class Transformer(nn.Module):
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
         eval_type: str = "evaluation",
+        epoch: int = 0,
     ) -> None:
         """Evaluates one epoch using loss as metric.
 
@@ -271,18 +291,21 @@ class Transformer(nn.Module):
                 forward call. If None will pass no additional kwargs. Defaults to None.
             eval_type (str, optional): The type of evaluation (for logging).
                 Defaults to "evaluation".
+            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
         """
 
         total_loss = 0
 
         self.eval()
 
-        for batch in tqdm(
-            data,
-            desc=f"Batch {eval_type}",
-            unit="batch",
-            position=1,
-            leave=False,
+        for batch_idx, batch in enumerate(
+            tqdm(
+                data,
+                desc=f"Batch {eval_type}",
+                unit="batch",
+                position=1,
+                leave=False,
+            )
         ):
 
             with torch.no_grad():
@@ -291,9 +314,16 @@ class Transformer(nn.Module):
                     **(forward_kwargs or {}),
                 )
 
-            loss = output.loss
+            loss = output.loss.item()
+
+            # visualize with tensorboard
+            self.tensorboard_writer.add_scalar(
+                f"{eval_type} Loss", loss.item(), epoch * len(data) + batch_idx
+            )
 
             # Accumulate the validation loss.
-            total_loss += loss.item()
+            total_loss += loss
 
-        logger.info("{0} loss: {1:.2f}".format(eval_type, total_loss / len(data)))
+        logger.info(
+            "Average {0} loss: {1:.2f}".format(eval_type, total_loss / len(data))
+        )
