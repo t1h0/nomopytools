@@ -143,13 +143,13 @@ def convert_labels(
 
 
 def one_hot_multitask(
-    tensor: torch.Tensor, num_classes: Sequence[int] | None = None
+    tensor: torch.IntTensor, num_classes: Sequence[int] | None = None
 ) -> torch.Tensor:
     """Create one hot mappings for multi task true labels. E.g. a sample with true label
     class 1 for the first task and 3 for the second will get [0,1,0,0,0,1].
 
     Args:
-        tensor (torch.Tensor): Tensor with samples as rows and true labels per task
+        tensor (torch.IntTensor): Tensor with samples as rows and true labels per task
             as columns.
         num_classes (Sequence[int] | None, optional): Number of classes per task.
             If None, will take max values found in tensor. Defaults to None.

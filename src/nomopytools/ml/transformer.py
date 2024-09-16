@@ -14,6 +14,7 @@ from transformers.utils.generic import ModelOutput
 from tqdm import tqdm
 from collections.abc import Sequence
 from .utils import train_validation_test_split, Device, to_device
+from .containers import Metric
 
 # logger setup
 from loguru import logger
@@ -140,190 +141,178 @@ class Transformer(nn.Module):
         for epoch in tqdm(
             range(epochs), desc="Epochs", unit="epoch", position=0, leave=True
         ):
+            # iterate over epochs
             logger.info(f"=== Epoch {epoch} ===")
-            self.train_epoch(
-                data.train,
-                model_input_keys,
-                optimizer,
-                lr_scheduler,
-                forward_kwargs,
-                epoch=epoch,
-            )
-            self.validate_epoch(data.val, model_input_keys, forward_kwargs, epoch=epoch)
-            self.test_epoch(data.test, model_input_keys, forward_kwargs, epoch=epoch)
+
+            for step in ("train", "validate", "test"):
+                # iterate over training, validation and test
+                # get data
+                data_step = getattr(data, step)
+
+                for batch_idx, batch in enumerate(
+                    tqdm(
+                        data_step,
+                        position=1,
+                        desc=f"Batch {step}",
+                        unit="batch",
+                        leave=False,
+                    )
+                ):
+                    # iterate over batches
+
+                    if step == "train":
+                        # set to train mode
+                        self.train()
+
+                        metrics = self.train_epoch(
+                            batch,
+                            model_input_keys,
+                            optimizer,
+                            lr_scheduler,
+                            forward_kwargs,
+                        )
+                    else:
+                        # set to eval mode
+                        self.eval()
+
+                        metrics = getattr(self, f"{step}_epoch")(
+                            batch, model_input_keys, forward_kwargs
+                        )
+
+                    # execute and get metric
+
+                    for metric in metrics:
+                        # log to tensorboard
+                        self.tensorboard_writer.add_scalar(
+                            f"{step} {metric.name}",
+                            metric.value,
+                            epoch * len(data_step) + batch_idx,
+                        )
 
         logger.info("Training complete!")
 
     def train_epoch(
         self,
-        data: DataLoader,
+        batch: DataLoader,
         data_keys: Sequence[str],
         optimizer: Optimizer,
         lr_scheduler: LRScheduler,
         forward_kwargs: dict | None = None,
-        epoch: int = 0,
-    ) -> None:
+    ) -> tuple[Metric, ...]:
         """Trains one epoch.
 
         Args:
-            data (DataLoader): The data to train on.
+            batch (DataLoader): The batch to train on.
             data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
                 to pass it to forward call with.
             optimizer (Optimizer): The optimizer to use.
             lr_scheduler (LRScheduler): The learning rate scheduler to use.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
+
+        Returns:
+            tuple[Metric,...]: The loss.
         """
-
-        total_loss = 0
-
         # set model to train mode
         self.train()
 
-        for batch_idx, batch in enumerate(
-            tqdm(
-                data,
-                position=1,
-                desc="Batch training",
-                unit="batch",
-                leave=False,
-            )
-        ):
+        # clear any previously calculated gradients
+        self.zero_grad()
 
-            # clear any previously calculated gradients
-            self.zero_grad()
+        # forward pass
+        output = self(
+            **dict(zip(data_keys, batch)),
+            **(forward_kwargs or {}),
+        )
 
-            # forward pass
+        # get loss
+        out = output.loss.item()
+
+        # backward pass
+        output.loss.backward()
+
+        # Clip norm of the gradients to 1.0 to prevent
+        # exploding gradients problem
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+        # update parameters
+        optimizer.step()
+
+        # update learning rate
+        lr_scheduler.step()
+
+        return (Metric("loss", out),)
+
+    def validate_epoch(
+        self,
+        batch: DataLoader,
+        data_keys: Sequence[str],
+        forward_kwargs: dict | None = None,
+    ) -> tuple[Metric, ...]:
+        """Validates one epoch.
+
+        Args:
+            batch (DataLoader): The batch to train on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+
+        Returns:
+            tuple[Metric,...]: The loss.
+        """
+        return self.eval_epoch(
+            batch=batch,
+            data_keys=data_keys,
+            forward_kwargs=forward_kwargs,
+        )
+
+    def test_epoch(
+        self,
+        batch: DataLoader,
+        data_keys: Sequence[str],
+        forward_kwargs: dict | None = None,
+    ) -> tuple[Metric, ...]:
+        """Tests one epoch.
+
+        Args:
+            batch (DataLoader): The batch to train on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+
+        Returns:
+            tuple[Metric,...]: The loss.
+        """
+        return self.eval_epoch(
+            batch=batch,
+            data_keys=data_keys,
+            forward_kwargs=forward_kwargs,
+        )
+
+    def eval_epoch(
+        self,
+        batch: DataLoader,
+        data_keys: Sequence[str],
+        forward_kwargs: dict | None = None,
+    ) -> tuple[Metric, ...]:
+        """Evaluates one epoch using loss as metric.
+
+        Args:
+            batch (DataLoader): The batch to train on.
+            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
+                to pass it to forward call with.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+
+        Returns:
+            tuple[Metric,...]: The loss.
+        """
+        with torch.no_grad():
             output = self(
                 **dict(zip(data_keys, batch)),
                 **(forward_kwargs or {}),
             )
 
-            # get loss
-            loss = output.loss
-            total_loss += loss.item()
-
-            # log to tensorboard
-            self.tensorboard_writer.add_scalar(
-                "Training loss", loss.item(), epoch * len(data) + batch_idx
-            )
-
-            # backward pass
-            loss.backward()
-
-            # Clip norm of the gradients to 1.0 to prevent
-            # exploding gradients problem
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-
-            # update parameters
-            optimizer.step()
-
-            # update learning rate
-            lr_scheduler.step()
-
-        logger.info("average training loss: {0:.2f}".format(total_loss / len(data)))
-
-    def validate_epoch(
-        self,
-        data: DataLoader,
-        data_keys: Sequence[str],
-        forward_kwargs: dict | None = None,
-        epoch: int = 0,
-    ) -> None:
-        """Validates one epoch.
-
-        Args:
-            data (DataLoader): The data to validate on.
-            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
-                to pass it to forward call with.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-        """
-        return self.eval_epoch(
-            data=data,
-            data_keys=data_keys,
-            forward_kwargs=forward_kwargs,
-            eval_type="validation",
-            epoch=epoch,
-        )
-
-    def test_epoch(
-        self,
-        data: DataLoader,
-        data_keys: Sequence[str],
-        forward_kwargs: dict | None = None,
-        epoch: int = 0,
-    ) -> None:
-        """Tests one epoch.
-
-        Args:
-            data (DataLoader): The data to test on.
-            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
-                to pass it to forward call with.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
-        """
-        return self.eval_epoch(
-            data=data,
-            data_keys=data_keys,
-            forward_kwargs=forward_kwargs,
-            eval_type="test",
-            epoch=epoch,
-        )
-
-    def eval_epoch(
-        self,
-        data: DataLoader,
-        data_keys: Sequence[str],
-        forward_kwargs: dict | None = None,
-        eval_type: str = "evaluation",
-        epoch: int = 0,
-    ) -> None:
-        """Evaluates one epoch using loss as metric.
-
-        Args:
-            data (DataLoader): The data to evaluate on.
-            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
-                to pass it to forward call with.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-            eval_type (str, optional): The type of evaluation (for logging).
-                Defaults to "evaluation".
-            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
-        """
-
-        total_loss = 0
-
-        self.eval()
-
-        for batch_idx, batch in enumerate(
-            tqdm(
-                data,
-                desc=f"Batch {eval_type}",
-                unit="batch",
-                position=1,
-                leave=False,
-            )
-        ):
-
-            with torch.no_grad():
-                output = self(
-                    **dict(zip(data_keys, batch)),
-                    **(forward_kwargs or {}),
-                )
-
-            loss = output.loss.item()
-
-            # visualize with tensorboard
-            self.tensorboard_writer.add_scalar(
-                f"{eval_type} Loss", loss.item(), epoch * len(data) + batch_idx
-            )
-
-            # Accumulate the validation loss.
-            total_loss += loss
-
-        logger.info(
-            "Average {0} loss: {1:.2f}".format(eval_type, total_loss / len(data))
-        )
+        return (Metric("loss", output.loss.item()),)

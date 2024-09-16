@@ -7,16 +7,16 @@ from transformers import (
     AutoModelForTextEncoding,
     AutoModelForSequenceClassification,
 )
-from transformers.modeling_outputs import ModelOutput, SequenceClassifierOutput
+from transformers.modeling_outputs import SequenceClassifierOutput
 from sklearn.metrics import matthews_corrcoef, f1_score
 from tqdm import tqdm
 from bidict import bidict
-from dataclasses import dataclass
 from collections.abc import Sequence, Hashable
 import math
 from typing import TypeVar, Generic
 from .utils import batched, convert_labels, one_hot_multitask
-from .transformer import Transformer, BaseAutoModel, logger
+from .transformer import Transformer, BaseAutoModel
+from .containers import MultiLabelOutput, Metric
 
 
 class TextTransformer(Transformer):
@@ -192,82 +192,45 @@ class SequenceClassifier(TextTransformer):
 
     def eval_epoch(
         self,
-        data: DataLoader,
+        batch: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
-        eval_type: str = "evaluation",
-        epoch: int = 0,
-    ) -> None:
+    ) -> tuple[Metric, ...]:
         """Evaluates one epoch using loss as metric.
 
         Args:
-            data (DataLoader): The data to evaluate on.
+            batch (DataLoader): The batch to evaluate on.
             data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
                 to pass it to forward call with.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-            eval_type (str, optional): The type of evaluation (for logging).
-                Defaults to "evaluation".
-            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
+
+        Returns:
+            tuple[Metric,...]: F1 score and matthew's correlation coefficient.
         """
-        self.eval()
 
-        f1_total = 0
-        mcc_total = 0
-
-        for batch_idx, batch in enumerate(
-            tqdm(
-                data,
-                desc=f"Batch {eval_type}",
-                unit="batch",
-                position=1,
-                leave=False,
+        prediction = (
+            self.predict(
+                **dict(zip(data_keys, batch)),
+                **(forward_kwargs or {}),
             )
-        ):
+            .argmax()
+            .cpu()
+        )
+        true_labels = batch[data_keys.index("labels")]
 
-            prediction = (
-                self.predict(
-                    **dict(zip(data_keys, batch)),
-                    **(forward_kwargs or {}),
-                )
-                .argmax()
-                .cpu()
-            )
-            true_labels = batch[data_keys.index("labels")]
+        f1 = f1_score(true_labels, prediction)
+        mcc = matthews_corrcoef(true_labels, prediction)
 
-            f1 = f1_score(true_labels, prediction)
-            f1_total += f1
-
-            mcc = matthews_corrcoef(true_labels, prediction)
-            mcc_total += mcc
-
-            # visualize with tensorboard
-            self.tensorboard_writer.add_scalar(
-                f"{eval_type} f1", f1, epoch * len(data) + batch_idx
-            )
-            self.tensorboard_writer.add_scalar(
-                f"{eval_type} MCC", mcc, epoch * len(data) + batch_idx
-            )
-
-        logger.info(f"average {eval_type} f1 score: {round(f1_total/len(data),2)}")
-        logger.info(f"average {eval_type} MCC: {round(mcc_total/len(data),2)}")
+        return (
+            Metric("f1 score", f1),
+            Metric("matthew's correlation coefficient", mcc),
+        )
 
 
 OutputHeadName = TypeVar("OutputHeadName", bound=str)
-OutputHeadKey = TypeVar("OutputHeadKey", bound=str)
-
 
 class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
-
-    @dataclass
-    class MultiLabelOutput(ModelOutput, Generic[OutputHeadKey]):
-        """Dataclass for multi-label output."""
-
-        loss: torch.FloatTensor | None = None
-        losses: dict[OutputHeadKey, torch.FloatTensor] | None = None
-        logits: dict[OutputHeadKey, torch.FloatTensor] | None = None
-        hidden_states: tuple[torch.FloatTensor, ...] | None = None
-        attentions: tuple[torch.FloatTensor, ...] | None = None
 
     def __init__(
         self,
@@ -352,7 +315,7 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
             )
         }
 
-        return self.MultiLabelOutput(
+        return MultiLabelOutput(
             loss=sum(losses.values()),
             losses=losses,
             logits=logits,
@@ -374,70 +337,45 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
 
     def eval_epoch(
         self,
-        data: DataLoader,
+        batch: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
-        eval_type: str = "evaluation",
-        epoch: int = 0,
-    ) -> None:
+    ) -> tuple[Metric, ...]:
         """Evaluates one epoch using loss as metric.
 
         Args:
-            data (DataLoader): The data to evaluate on.
+            batch (DataLoader): The batch to evaluate on.
             data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
                 to pass it to forward call with.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
-            eval_type (str, optional): The type of evaluation (for logging).
-                Defaults to "evaluation".
-            epoch (int, optional): Epoch number for tensorboard. Defaults to 0.
+
+        Returns:
+            tuple[Metric,...]: F1 score.
         """
-        self.eval()
 
-        f1_total = 0
+        prediction = self.predict(
+            **dict(zip(data_keys, batch)),
+            **(forward_kwargs or {}),
+        )
 
-        for batch_idx, batch in enumerate(
-            tqdm(
-                data,
-                desc=f"Batch {eval_type}",
-                unit="batch",
-                position=1,
-                leave=False,
-            )
-        ):
+        # apply argmax and stack
+        prediction = torch.stack(
+            tuple(t.argmax(1) for t in prediction.values()), 1
+        ).cpu()
 
-            prediction = self.predict(
-                **dict(zip(data_keys, batch)),
-                **(forward_kwargs or {}),
-            )
+        # get true labels
+        true_labels = batch[data_keys.index("labels")]
 
-            # apply argmax and stack
-            prediction = torch.stack(
-                tuple(t.argmax(1) for t in prediction.values()), 1
-            ).cpu()
+        # create one hot tensors
+        prediction_one_hot = one_hot_multitask(prediction, list(self.heads.values()))
+        true_labels_one_hot = one_hot_multitask(true_labels, list(self.heads.values()))
 
-            # get true labels
-            true_labels = batch[data_keys.index("labels")]
+        f1 = f1_score(
+            true_labels_one_hot,
+            prediction_one_hot,
+            average="weighted",
+            zero_division=0,
+        )
 
-            # create one hot tensors
-            prediction_one_hot = one_hot_multitask(
-                prediction, list(self.heads.values())
-            )
-            true_labels_one_hot = one_hot_multitask(
-                true_labels, list(self.heads.values())
-            )
-
-            f1 = f1_score(
-                true_labels_one_hot,
-                prediction_one_hot,
-                average="weighted",
-                zero_division=0,
-            )
-            f1_total += f1
-
-            # visualize with tensorboard
-            self.tensorboard_writer.add_scalar(
-                f"{eval_type} f1", f1, epoch * len(data) + batch_idx
-            )
-
-        logger.info(f"average {eval_type} f1 score: {round(f1_total/len(data),2)}")
+        return (Metric("F1 score", f1),)
