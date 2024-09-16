@@ -150,6 +150,11 @@ class SequenceClassifier(TextTransformer):
         return super().infer(*args, **kwargs)
 
     def predict(self, *args, **kwargs) -> torch.Tensor:
+        """Model prediction. Applies a softmax layer after inference to predict a class.
+
+        Returns:
+            torch.Tensor: _description_
+        """
         return self.infer(*args, **kwargs).logits.softmax(-1)
 
     def get_model_inputs(
@@ -215,7 +220,6 @@ class SequenceClassifier(TextTransformer):
                     **(forward_kwargs or {}),
                 )
                 .argmax()
-                .detach()
                 .cpu()
             )
             true_labels = batch[data_keys.index("labels")]
