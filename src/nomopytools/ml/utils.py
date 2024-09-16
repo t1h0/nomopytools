@@ -1,4 +1,5 @@
 import torch
+from torch.nn.functional import one_hot
 from torch.utils.data import TensorDataset, random_split, DataLoader, RandomSampler
 from loguru import logger
 from collections.abc import Sequence, Hashable, Iterable
@@ -40,6 +41,7 @@ def to_device(
         TensorContainer: The input with all containing Tensors transferred to Device.
     """
     device = device or Device
+
     if isinstance(cont, Sequence):
         return [to_device(s, device) for s in cont]
 
@@ -138,6 +140,31 @@ def convert_labels(
         out_tensors = torch.Tensor(out_tensors).transpose(0, 1)
 
     return tuple(out_bidicts), out_tensors.to(torch.int64)
+
+
+def one_hot_multitask(
+    tensor: torch.Tensor, num_classes: Sequence[int] | None = None
+) -> torch.Tensor:
+    """Create one hot mappings for multi task true labels. E.g. a sample with true label
+    class 1 for the first task and 3 for the second will get [0,1,0,0,0,1].
+
+    Args:
+        tensor (torch.Tensor): Tensor with samples as rows and true labels per task
+            as columns.
+        num_classes (Sequence[int] | None, optional): Number of classes per task.
+            If None, will take max values found in tensor. Defaults to None.
+
+    Returns:
+        torch.Tensor: The one hot tensor with samples as rows their one hot vectors
+            per class strung together.
+    """
+    if num_classes is None:
+        # add one because of zero indexing
+        num_classes = (tensor.max(0)[0] + 1).tolist()
+
+    return torch.cat(
+        tuple(one_hot(t, n) for t, n in zip(tensor.transpose(0, 1), num_classes)), 1
+    )
 
 
 IterYield = TypeVar("IterYield")
