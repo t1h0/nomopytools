@@ -4,7 +4,7 @@ from torch.optim.optimizer import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.adamw import AdamW
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 from transformers import (
     AutoModel,
     get_linear_schedule_with_warmup,
@@ -32,6 +32,7 @@ class Transformer(nn.Module):
         auto_model_class: type[BaseAutoModel] = AutoModel,
         device: torch.device | None = None,
         freeze_model: bool = False,
+        random_seed: int | None = False,
         *args,
         **kwargs,
     ) -> None:
@@ -48,17 +49,24 @@ class Transformer(nn.Module):
                 select GPU if possible, else CPU. Defaults to None.
             freeze_model (bool, optional): Whether to freeze the pretrained model
                 (e.g. for fine-tuning). Defaults to False.
+            random_seed (int, optional). Seed to use for randomization. If None, will
+                let torch decide. Defaults to None.
             *args, **kwargs: To pass to nn.Module.
         """
         super().__init__(*args, **kwargs)
+
         self.model = auto_model_class.from_pretrained(
             model_name, **(model_kwargs or {})
         )
+
         if freeze_model:
             for param in self.model.parameters():
                 param.requires_grad = False
+
         self.device = device or Device
         self.to(self.device)
+
+        self.random_seed = random_seed
 
         # for tensorboard visualization
         self.tensorboard_writer = SummaryWriter()
@@ -118,6 +126,7 @@ class Transformer(nn.Module):
             train_size=train_size,
             val_size=val_size,
             test_size=test_size,
+            random_seed=self.random_seed,
         )
 
         # get optimizer

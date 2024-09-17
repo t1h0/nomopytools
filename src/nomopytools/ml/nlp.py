@@ -29,6 +29,7 @@ class TextTransformer(Transformer):
         auto_model_class: type[BaseAutoModel] = AutoModelForTextEncoding,
         device: torch.device | None = None,
         freeze_model: bool = False,
+        random_seed: int | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -47,6 +48,8 @@ class TextTransformer(Transformer):
                 select GPU if possible, else CPU. Defaults to None.
             freeze_model (bool, optional): Whether to freeze the pretrained model
                 (e.g. for fine-tuning). Defaults to False.
+            random_seed (int, optional). Seed to use for randomization. If None, will
+                let torch decide. Defaults to None.
             *args, **kwargs: To pass to nn.Module.
         """
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -58,6 +61,7 @@ class TextTransformer(Transformer):
             auto_model_class=auto_model_class,
             device=device,
             freeze_model=freeze_model,
+            random_seed=random_seed,
             *args,
             **kwargs,
         )
@@ -119,6 +123,7 @@ class SequenceClassifier(TextTransformer):
         auto_model_class: type[BaseAutoModel] = AutoModelForSequenceClassification,
         device: torch.device | None = None,
         freeze_model: bool = False,
+        random_seed: int | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -137,6 +142,8 @@ class SequenceClassifier(TextTransformer):
                 select GPU if possible, else CPU. Defaults to None.
             freeze_model (bool, optional): Whether to freeze the pretrained model
                 (e.g. for fine-tuning). Defaults to False.
+            random_seed (int, optional). Seed to use for randomization. If None, will
+                let torch decide. Defaults to None.
             *args, **kwargs: To pass to nn.Module.
         """
         super().__init__(
@@ -146,6 +153,7 @@ class SequenceClassifier(TextTransformer):
             auto_model_class=auto_model_class,
             device=device,
             freeze_model=freeze_model,
+            random_seed=random_seed,
             *args,
             **kwargs,
         )
@@ -230,6 +238,7 @@ class SequenceClassifier(TextTransformer):
 
 OutputHeadName = TypeVar("OutputHeadName", bound=str)
 
+
 class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
 
     def __init__(
@@ -239,6 +248,7 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
         tokenizer_kwargs: dict | None = None,
         device: torch.device | None = None,
         freeze_model: bool = False,
+        random_seed: int | None = None,
         heads: dict[OutputHeadName, int] | None = None,
         *args,
         **kwargs,
@@ -255,6 +265,8 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
                 select GPU if possible, else CPU. Defaults to None.
             freeze_model (bool, optional): Whether to freeze the pretrained model
                 (e.g. for fine-tuning). Defaults to False.
+            random_seed (int, optional). Seed to use for randomization. If None, will
+                let torch decide. Defaults to None.
             heads (dict[OutputHeadName, int] | None, optional): Output heads to add.
                 Keys will be identifiers in output, values the size of the respective heads.
                 Defaults to None.
@@ -269,6 +281,7 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
             auto_model_class=AutoModel,
             device=device,
             freeze_model=freeze_model,
+            random_seed=random_seed,
             *args,
             **kwargs,
         )

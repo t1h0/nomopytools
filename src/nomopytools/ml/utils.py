@@ -61,6 +61,7 @@ def train_validation_test_split(
     train_size: float = 0.8,
     val_size: float = 0.1,
     test_size: float = 0.1,
+    random_seed: int | None = None,
 ) -> DataSplit:
     """Create a train / validation / test split.
 
@@ -73,6 +74,8 @@ def train_validation_test_split(
             Defaults to 0.1.
         test_size (float, optional): Test set size (as proportion).
             Defaults to 0.1.
+        random_seed (int, optional). Seed to use for randomization. If None, will let
+            torch decide. Defaults to None.
 
     Raises:
         ValueError: If train, validation and test size don't sum up to 1.
@@ -84,11 +87,28 @@ def train_validation_test_split(
         raise ValueError("train, validation and test size must sum up to 1.")
     dataset = TensorDataset(*tensors)
     train_set, val_set, test_set = random_split(
-        dataset, [train_size, val_size, test_size]
+        dataset,
+        [train_size, val_size, test_size],
+        generator=(
+            torch.Generator().manual_seed(random_seed)
+            if random_seed
+            else torch.Generator()
+        ),
     )
 
     return DataSplit(
-        DataLoader(train_set, sampler=RandomSampler(train_set), batch_size=batch_size),
+        DataLoader(
+            train_set,
+            sampler=RandomSampler(
+                train_set,
+                generator=(
+                    torch.Generator().manual_seed(random_seed)
+                    if random_seed
+                    else torch.Generator()
+                ),
+            ),
+            batch_size=batch_size,
+        ),
         DataLoader(val_set, batch_size=batch_size),
         DataLoader(test_set, batch_size=batch_size),
     )
