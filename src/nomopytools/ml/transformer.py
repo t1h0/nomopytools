@@ -222,9 +222,6 @@ class Transformer(nn.Module):
         Returns:
             tuple[Metric,...]: The loss.
         """
-        # set model to train mode
-        self.train()
-
         # clear any previously calculated gradients
         self.zero_grad()
 
