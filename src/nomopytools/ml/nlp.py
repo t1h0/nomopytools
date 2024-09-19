@@ -302,15 +302,27 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
 
         self.to(self.device)
 
-    def forward(self, *args, **kwargs) -> MultiLabelOutput[OutputHeadName]:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> MultiLabelOutput[OutputHeadName]:
+        # move to device
+        input_ids = input_ids.to(self.device)
+        attention_mask = attention_mask.to(self.device)
+        labels = labels.to(self.device)
 
-        labels = kwargs.pop("labels").to(self.device)
-        output = super().forward(*args, **kwargs)
+        model_output = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            return_dict=True,
+        )
 
-        hidden_states = output.hidden_states
-        attentions = output.attentions
-        pooled_output = output.pooler_output  # CLS token representation
-        del output  # to avoid OOME
+        hidden_states = model_output.hidden_states
+        attentions = model_output.attentions
+        pooled_output = model_output.pooler_output  # CLS token representation
+        del model_output  # to avoid OOME
 
         pooled_output = self.dropout(pooled_output)
 
