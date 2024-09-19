@@ -5,8 +5,9 @@ from loguru import logger
 from collections.abc import Sequence, Hashable, Iterable
 from itertools import islice
 from bidict import bidict
-from .containers import DataSplit
 from typing import Any, TypeVar, overload
+from datetime import datetime
+from .containers import DataSplit
 
 # Device inspection
 if torch.cuda.is_available():
@@ -209,3 +210,12 @@ def batched(iterable: Iterable[IterYield], n: int):
     iterator = iter(iterable)
     while batch := list(islice(iterator, n)):
         yield batch
+
+
+def get_datetime() -> str:
+    """Get current datetime.
+
+    Returns:
+        str: The datetime as a string in the format YYYY-MM-DD_HH-MM-SS-MSSS
+    """
+    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:-3]

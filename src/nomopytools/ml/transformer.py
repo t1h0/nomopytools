@@ -13,7 +13,9 @@ from transformers.models.auto.auto_factory import _BaseAutoModelClass as BaseAut
 from transformers.utils.generic import ModelOutput
 from tqdm import tqdm
 from collections.abc import Sequence
-from .utils import train_validation_test_split, Device, to_device
+from pathlib import Path
+import os
+from .utils import train_validation_test_split, Device, get_datetime, to_device
 from .containers import Metric
 
 # logger setup
@@ -99,6 +101,8 @@ class Transformer(nn.Module):
         val_size: float = 0.1,
         test_size: float = 0.1,
         epochs: int = 4,
+        export_checkpoints: bool = False,
+        export_complete: bool | str | Path = False,
         *args,
         **kwargs,
     ) -> None:
@@ -118,6 +122,15 @@ class Transformer(nn.Module):
             test_size (float, optional): Test set size (as proportion).
                 Defaults to 0.1.
             epochs (int, optional): Number of epochs to run. Defaults to 4.
+            export_checkpoints (bool, optional): Whether to export a general checkpoint
+                of the model after each epoch to
+                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
+                Defaults to False.
+            export_complete (bool | str | Path, optional): Whether export the
+                model' state_dict after training is complete to
+                export/{ClassName}/torchscripts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
+                If a string or a Path is given, the model is exported to that location.
+                Defaults to False.
         """
         # get dataloaders
         data = train_validation_test_split(
@@ -180,6 +193,7 @@ class Transformer(nn.Module):
                             lr_scheduler,
                             forward_kwargs,
                         )
+
                     else:
                         # set to eval mode
                         self.eval()
@@ -189,13 +203,32 @@ class Transformer(nn.Module):
                         )
 
                     # execute and get metric
-
+                    # logger.info(f"Write {step} metric(s) for batch {batch_idx} to tensorboard..")
                     for metric in metrics:
                         # log to tensorboard
                         self.tensorboard_writer.add_scalar(
                             f"{step} {metric.name}",
                             metric.value,
                             epoch * len(data_step) + batch_idx,
+                        )
+
+                if step == "train":
+                    if export_checkpoints:
+                        logger.info("Export general checkpoint..")
+                        self.export_general_checkpoint(
+                            optimizer=optimizer,
+                            lr_scheduler=lr_scheduler,
+                            loss=next(m.value for m in metrics if m.name == "loss"),
+                            epoch=epoch,
+                            path=None,
+                        )
+                    if epoch == epochs - 1 and export_complete:
+                        logger.info("Export model..")
+                        self.export_state_dict(
+                            export_complete
+                            if isinstance(export_complete, (str, Path))
+                            and export_complete
+                            else None
                         )
 
         logger.info("Training complete!")
@@ -322,3 +355,52 @@ class Transformer(nn.Module):
             )
 
         return (Metric("loss", output.loss.item()),)
+
+    def export_state_dict(self, path: str | Path | None = None) -> None:
+        """Export the current state dict.
+
+        Args:
+            path (str | Path | None, optional): Path to export to. If None, will export
+                to export/{ClassName}/state-dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
+                Defaults to None.
+        """
+        if path is None:
+            dirs = f"export/{self.__class__.__name__}/state-dicts/"
+            os.makedirs(dirs, exist_ok=True)
+            path = f"{dirs}{get_datetime()}.pt"
+        torch.save(self.state_dict(), path)
+
+    def export_general_checkpoint(
+        self,
+        optimizer: Optimizer,
+        lr_scheduler: LRScheduler,
+        loss: torch.Tensor,
+        epoch: int,
+        path: str | Path | None = None,
+    ) -> None:
+        """Export a general checkpoint (for Inference and/or Resuming Training).
+
+        Args:
+            optimizer (Optimizer): The optimizer used during training.
+            lr_scheduler (LRScheduler): The learning rate scheduler used during training.
+            loss (torch.Tensor): The last loss.
+            epoch (int): The last epoch.
+            path (str | Path): The path to export to. Should be a .tar file.
+                If None, will export to
+                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
+                Defaults to None.
+        """
+        if path is None:
+            dirs = f"export/{self.__class__.__name__}/general-checkpoints/"
+            os.makedirs(dirs, exist_ok=True)
+            path = f"{dirs}{get_datetime()}_Epoch-{epoch}.tar"
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": self.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "lr_scheduler_state_dict": lr_scheduler.state_dict(),
+                "loss": loss,
+            },
+            path,
+        )
