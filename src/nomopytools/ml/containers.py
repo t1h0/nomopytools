@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers.modeling_outputs import ModelOutput
 from dataclasses import dataclass
-from typing import NamedTuple, Generic, TypeVar
+from typing import NamedTuple, Generic, TypeVar, TypedDict
 
 
 class DataSplit(NamedTuple):
@@ -33,3 +33,13 @@ class Metric:
 
     name: str
     value: float
+
+
+class GeneralCheckpoint(TypedDict):
+    """General checkpoint for ex/import."""
+
+    epoch: int
+    model_state_dict: dict
+    optimizer_state_dict: dict
+    lr_scheduler_state_dict: dict
+    loss: float

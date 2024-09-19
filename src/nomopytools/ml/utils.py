@@ -82,7 +82,7 @@ def train_validation_test_split(
         ValueError: If train, validation and test size don't sum up to 1.
 
     Returns:
-        SequenceClassifier.DataSplit: The three sets.
+        DataSplit: The three sets.
     """
     if train_size + val_size + test_size != 1:
         raise ValueError("train, validation and test size must sum up to 1.")

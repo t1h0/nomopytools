@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 import os
 from .utils import train_validation_test_split, Device, get_datetime, to_device
-from .containers import Metric
+from .containers import Metric, DataSplit, GeneralCheckpoint
 
 # logger setup
 from loguru import logger
@@ -92,7 +92,7 @@ class Transformer(nn.Module):
         with torch.no_grad():
             return self(*args, **kwargs)
 
-    def perform_training(
+    def start_training(
         self,
         model_input: dict[str, torch.Tensor],
         forward_kwargs: dict | None = None,
@@ -103,10 +103,8 @@ class Transformer(nn.Module):
         epochs: int = 4,
         export_checkpoints: bool = False,
         export_complete: bool | str | Path = False,
-        *args,
-        **kwargs,
     ) -> None:
-        """Trains the classifier.
+        """Start training.
 
         Args:
             model_input (dict[str,torch.Tensor]): Model inputs that will be
@@ -128,42 +126,143 @@ class Transformer(nn.Module):
                 Defaults to False.
             export_complete (bool | str | Path, optional): Whether export the
                 model' state_dict after training is complete to
-                export/{ClassName}/torchscripts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
+                export/{ClassName}/state_dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
                 If a string or a Path is given, the model is exported to that location.
                 Defaults to False.
         """
-        # get dataloaders
-        data = train_validation_test_split(
-            *model_input.values(),
+        # get data, optimizer, lr_scheduler
+        data, optimizer, lr_scheduler = self._get_datasplit_optimizer_lrscheduler(
+            model_input=model_input,
             batch_size=batch_size,
             train_size=train_size,
             val_size=val_size,
             test_size=test_size,
-            random_seed=self.random_seed,
+            epochs=epochs,
         )
 
-        # get optimizer
-        optimizer = AdamW(
-            self.parameters(),
-            # lr=2e-5,
+        return self._perform_training(
+            data=data,
+            model_input_keys=list(model_input.keys()),
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            forward_kwargs=forward_kwargs,
+            start_epoch=0,
+            export_checkpoints=export_checkpoints,
+            export_complete=export_complete,
         )
 
-        # get learning rate scheduler
-        lr_scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=0,  # Default value in run_glue.py
-            num_training_steps=len(data.train) * epochs,
+    def resume_training(
+        self,
+        checkpoint: GeneralCheckpoint,
+        model_input: dict[str, torch.Tensor],
+        forward_kwargs: dict | None = None,
+        batch_size: int = 32,
+        train_size: float = 0.8,
+        val_size: float = 0.1,
+        test_size: float = 0.1,
+        epochs: int = 4,
+        export_checkpoints: bool = False,
+        export_complete: bool | str | Path = False,
+    ) -> None:
+        """Resume training after loading a checkpoint.
+
+        Args:
+            checkpoint (GeneralCheckpoint): Checkpoint, loaded with torch.load.
+            model_input (dict[str,torch.Tensor]): Model inputs that will be
+                train-validation-test split and passed to forward call with the
+                respective keys from the dictionary. E.g. input_ids and attention_mask.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+            batch_size (int, optional): Batch size. Defaults to 32.
+            train_size (float, optional): Train set size (as proportion).
+                Defaults to 0.8.
+            val_size (float, optional): Validation set size (as proportion).
+                Defaults to 0.1.
+            test_size (float, optional): Test set size (as proportion).
+                Defaults to 0.1.
+            epochs (int, optional): Number of epochs to run. Defaults to 4.
+            export_checkpoints (bool, optional): Whether to export a general checkpoint
+                of the model after each epoch to
+                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
+                Defaults to False.
+            export_complete (bool | str | Path, optional): Whether export the
+                model' state_dict after training is complete to
+                export/{ClassName}/state-dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
+                If a string or a Path is given, the model is exported to that location.
+                Defaults to False.
+        """
+        # get data, optimizer, lr_scheduler
+        data, optimizer, lr_scheduler = self._get_datasplit_optimizer_lrscheduler(
+            model_input=model_input,
+            batch_size=batch_size,
+            train_size=train_size,
+            val_size=val_size,
+            test_size=test_size,
+            epochs=epochs,
         )
 
-        # get forward_keys
-        model_input_keys = list(model_input.keys())
+        # load checkpoint
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
+
+        return self._perform_training(
+            data=data,
+            model_input_keys=list(model_input.keys()),
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            forward_kwargs=forward_kwargs,
+            start_epoch=checkpoint["epoch"],
+            export_checkpoints=export_checkpoints,
+            export_complete=export_complete,
+        )
+
+    def _perform_training(
+        self,
+        data: DataSplit,
+        model_input_keys: list[str],
+        optimizer: Optimizer,
+        lr_scheduler: LRScheduler,
+        forward_kwargs: dict | None = None,
+        epochs: int = 4,
+        start_epoch: int = 0,
+        export_checkpoints: bool = False,
+        export_complete: bool | str | Path = False,
+        *args,
+        **kwargs,
+    ) -> None:
+        """Trains the classifier.
+
+        Args:
+            data (DataSplit): Train, validate and test set.
+            model_input_keys (list[str]): Keys to pass the Tensors that each DataLoader
+                in data yields to the model forward call with.
+            optimizer (Optimizer): The optimizer to use.
+            lr_scheduler (LRScheduler): The learning rate scheduler to use.
+            forward_kwargs (dict | None, optional): Additional kwargs to pass to
+                forward call. If None will pass no additional kwargs. Defaults to None.
+            epochs (int, optional): Number of epochs to run. Defaults to 4.
+            start_epoch (int, optional): The epoch to start with (may be >0 if resuming
+                training). Defaults to 0.
+            export_checkpoints (bool, optional): Whether to export a general checkpoint
+                of the model after each epoch to
+                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
+                Defaults to False.
+            export_complete (bool | str | Path, optional): Whether export the
+                model' state_dict after training is complete to
+                export/{ClassName}/state_dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
+                If a string or a Path is given, the model is exported to that location.
+                Defaults to False.
+        """
 
         # train
 
         for epoch in tqdm(
             range(epochs), desc="Epochs", unit="epoch", position=0, leave=True
         ):
-            # iterate over epochs
+            if epoch < start_epoch:
+                # to skip epochs after loading a checkpoint
+                continue
+
             logger.info(f"=== Epoch {epoch} ===")
 
             for step in ("train", "validate", "test"):
@@ -232,6 +331,59 @@ class Transformer(nn.Module):
                         )
 
         logger.info("Training complete!")
+
+    def _get_datasplit_optimizer_lrscheduler(
+        self,
+        model_input: dict[str, torch.Tensor],
+        batch_size: int = 32,
+        train_size: float = 0.8,
+        val_size: float = 0.1,
+        test_size: float = 0.1,
+        epochs: int = 4,
+    ) -> tuple[DataSplit, Optimizer, LRScheduler]:
+        """Split data into train, validate and test set and also define optimizer and
+        learning rate scheduler.
+
+        Args:
+            model_input (dict[str,torch.Tensor]): Model inputs that will be
+                train-validation-test split and passed to forward call with the
+                respective keys from the dictionary. E.g. input_ids and attention_mask.
+            batch_size (int, optional): Batch size. Defaults to 32.
+            train_size (float, optional): Train set size (as proportion).
+                Defaults to 0.8.
+            val_size (float, optional): Validation set size (as proportion).
+                Defaults to 0.1.
+            test_size (float, optional): Test set size (as proportion).
+                Defaults to 0.1.
+
+        Returns:
+            tuple[DataSplit, Optimizer, LRScheduler]: The datasets, the optimizer and
+                the learning rate scheduler.
+        """
+        # get dataloaders
+        data = train_validation_test_split(
+            *model_input.values(),
+            batch_size=batch_size,
+            train_size=train_size,
+            val_size=val_size,
+            test_size=test_size,
+            random_seed=self.random_seed,
+        )
+
+        # get optimizer
+        optimizer = AdamW(
+            self.parameters(),
+            # lr=2e-5,
+        )
+
+        # get learning rate scheduler
+        lr_scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=0,
+            num_training_steps=len(data.train) * epochs,
+        )
+
+        return data, optimizer, lr_scheduler
 
     def train_epoch(
         self,
