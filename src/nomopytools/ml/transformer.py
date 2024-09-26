@@ -14,9 +14,20 @@ from transformers.utils.generic import ModelOutput
 from tqdm import tqdm
 from collections.abc import Sequence
 from pathlib import Path
+import time
 import os
+import sys
+import glob
+from itertools import islice
+from dataclasses import dataclass
 from .utils import train_validation_test_split, Device, get_datetime, to_device
-from .containers import Metric, DataSplit, GeneralCheckpoint
+from .containers import Metric, DataSplit, Checkpoint
+from .globals import (
+    Phases,
+    PhasesArgs,
+    get_checkpoint_export_path,
+    get_state_dicts_export_path,
+)
 
 # logger setup
 from loguru import logger
@@ -26,6 +37,14 @@ logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
 
 class Transformer(nn.Module):
+
+    @dataclass
+    class _ModelState:
+        optimizer: Optimizer | None = None
+        lr_scheduler: LRScheduler | None = None
+        epoch: int = 0
+        phase: Phases = "train"
+        batch: int = 0
 
     def __init__(
         self,
@@ -66,6 +85,7 @@ class Transformer(nn.Module):
                 param.requires_grad = False
 
         self.device = device or Device
+        logger.info(f"Using device {self.device}")
         self.to(self.device)
 
         self.random_seed = random_seed
@@ -101,7 +121,7 @@ class Transformer(nn.Module):
         val_size: float = 0.1,
         test_size: float = 0.1,
         epochs: int = 4,
-        export_checkpoints: bool = False,
+        export_checkpoints: int | None = None,
         export_complete: bool | str | Path = False,
     ) -> None:
         """Start training.
@@ -120,10 +140,10 @@ class Transformer(nn.Module):
             test_size (float, optional): Test set size (as proportion).
                 Defaults to 0.1.
             epochs (int, optional): Number of epochs to run. Defaults to 4.
-            export_checkpoints (bool, optional): Whether to export a general checkpoint
-                of the model after each epoch to
-                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
-                Defaults to False.
+            export_checkpoints (int | None, optional): Interval in minutes in which
+                to export a checkpoint of the model to
+                export/{ClassName}/checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.tar
+                In None, won't export checkpoints. Defaults to None.
             export_complete (bool | str | Path, optional): Whether export the
                 model' state_dict after training is complete to
                 export/{ClassName}/state_dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
@@ -146,31 +166,33 @@ class Transformer(nn.Module):
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
             forward_kwargs=forward_kwargs,
-            start_epoch=0,
+            epochs=epochs,
             export_checkpoints=export_checkpoints,
             export_complete=export_complete,
         )
 
     def resume_training(
         self,
-        checkpoint: GeneralCheckpoint,
         model_input: dict[str, torch.Tensor],
+        checkpoint: Checkpoint | None = None,
         forward_kwargs: dict | None = None,
         batch_size: int = 32,
         train_size: float = 0.8,
         val_size: float = 0.1,
         test_size: float = 0.1,
         epochs: int = 4,
-        export_checkpoints: bool = False,
+        export_checkpoints: int | None = None,
         export_complete: bool | str | Path = False,
     ) -> None:
         """Resume training after loading a checkpoint.
 
         Args:
-            checkpoint (GeneralCheckpoint): Checkpoint, loaded with torch.load.
             model_input (dict[str,torch.Tensor]): Model inputs that will be
                 train-validation-test split and passed to forward call with the
                 respective keys from the dictionary. E.g. input_ids and attention_mask.
+            checkpoint (Checkpoint | None, optional): Checkpoint, loaded with
+                torch.load. If None, will scan export folder and let the user select.
+                Defaults to None.
             forward_kwargs (dict | None, optional): Additional kwargs to pass to
                 forward call. If None will pass no additional kwargs. Defaults to None.
             batch_size (int, optional): Batch size. Defaults to 32.
@@ -181,16 +203,22 @@ class Transformer(nn.Module):
             test_size (float, optional): Test set size (as proportion).
                 Defaults to 0.1.
             epochs (int, optional): Number of epochs to run. Defaults to 4.
-            export_checkpoints (bool, optional): Whether to export a general checkpoint
-                of the model after each epoch to
-                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
-                Defaults to False.
+            export_checkpoints (int | None, optional): Interval in minutes in which
+                to export a checkpoint of the model to
+                export/{ClassName}/checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.tar
+                In None, won't export checkpoints. Defaults to None.
             export_complete (bool | str | Path, optional): Whether export the
                 model' state_dict after training is complete to
                 export/{ClassName}/state-dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
                 If a string or a Path is given, the model is exported to that location.
                 Defaults to False.
         """
+        if checkpoint is None:
+            checkpoint = self._load_checkpoint()
+
+        if checkpoint["random_seed"] != self.random_seed:
+            raise ValueError("Random seed of checkpoint must match that of the model.")
+
         # get data, optimizer, lr_scheduler
         data, optimizer, lr_scheduler = self._get_datasplit_optimizer_lrscheduler(
             model_input=model_input,
@@ -211,7 +239,10 @@ class Transformer(nn.Module):
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
             forward_kwargs=forward_kwargs,
+            epochs=epochs,
             start_epoch=checkpoint["epoch"],
+            start_phase=checkpoint["phase"],
+            start_batch=checkpoint["batch"] + 1,
             export_checkpoints=export_checkpoints,
             export_complete=export_complete,
         )
@@ -225,7 +256,9 @@ class Transformer(nn.Module):
         forward_kwargs: dict | None = None,
         epochs: int = 4,
         start_epoch: int = 0,
-        export_checkpoints: bool = False,
+        start_phase: Phases = "train",
+        start_batch: int = 0,
+        export_checkpoints: int | None = None,
         export_complete: bool | str | Path = False,
         *args,
         **kwargs,
@@ -243,10 +276,14 @@ class Transformer(nn.Module):
             epochs (int, optional): Number of epochs to run. Defaults to 4.
             start_epoch (int, optional): The epoch to start with (may be >0 if resuming
                 training). Defaults to 0.
-            export_checkpoints (bool, optional): Whether to export a general checkpoint
-                of the model after each epoch to
-                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
-                Defaults to False.
+            start_batch (int, optional): The batch to start with (may be >0 if resuming
+                training). Defaults to 0.
+            start_phase ("train" | "validate" | "test", optional): The phase to start
+                with. Defaults to "train".
+            export_checkpoints (int | None, optional): Interval in minutes in which
+                to export a checkpoint of the model to
+                export/{ClassName}/checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.tar
+                In None, won't export checkpoints. Defaults to None.
             export_complete (bool | str | Path, optional): Whether export the
                 model' state_dict after training is complete to
                 export/{ClassName}/state_dicts/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.pt.
@@ -254,36 +291,60 @@ class Transformer(nn.Module):
                 Defaults to False.
         """
 
+        current_state = self._ModelState(
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+        )
+
+        # set phases to run
+        phases = PhasesArgs[PhasesArgs.index(start_phase) :]
+
+        t0 = time.time()
+
         # train
 
-        for epoch in tqdm(
-            range(epochs), desc="Epochs", unit="epoch", position=0, leave=True
+        for current_state.epoch in tqdm(
+            range(start_epoch, epochs),
+            desc="Epochs",
+            unit="epoch",
+            position=0,
+            leave=True,
         ):
-            if epoch < start_epoch:
-                # to skip epochs after loading a checkpoint
-                continue
 
-            logger.info(f"=== Epoch {epoch} ===")
-
-            for step in ("train", "validate", "test"):
+            for current_state.phase in phases:
                 # iterate over training, validation and test
-                # get data
-                data_step = getattr(data, step)
 
-                for batch_idx, batch in enumerate(
+                # get data
+                data_phase: DataLoader = getattr(data, current_state.phase)
+
+                # set start batch
+                if current_state.phase != start_phase:
+                    start_batch = 0
+
+                if start_batch >= len(data_phase):
+                    continue
+
+                if current_state.phase == "train":
+                    # set to train mode
+                    self.train()
+                else:
+                    # set to eval mode
+                    self.eval()
+
+                for current_state.batch, batch in enumerate(
                     tqdm(
-                        data_step,
+                        islice(data_phase, start_batch, None),
                         position=1,
-                        desc=f"Batch {step}",
+                        desc=f"Batch {current_state.phase}",
                         unit="batch",
                         leave=False,
+                        total=len(data_phase) - start_batch,
                     )
                 ):
+
                     # iterate over batches
 
-                    if step == "train":
-                        # set to train mode
-                        self.train()
+                    if current_state.phase == "train":
 
                         metrics = self.train_epoch(
                             batch,
@@ -294,41 +355,40 @@ class Transformer(nn.Module):
                         )
 
                     else:
-                        # set to eval mode
-                        self.eval()
-
-                        metrics = getattr(self, f"{step}_epoch")(
-                            batch, model_input_keys, forward_kwargs
-                        )
+                        metrics: tuple[Metric, ...] = getattr(
+                            self, f"{current_state.phase}_epoch"
+                        )(batch, model_input_keys, forward_kwargs)
 
                     # execute and get metric
                     # logger.info(f"Write {step} metric(s) for batch {batch_idx} to tensorboard..")
                     for metric in metrics:
                         # log to tensorboard
                         self.tensorboard_writer.add_scalar(
-                            f"{step} {metric.name}",
+                            f"{current_state.phase} {metric.name}",
                             metric.value,
-                            epoch * len(data_step) + batch_idx,
+                            current_state.epoch * len(data_phase) + current_state.batch,
                         )
 
-                if step == "train":
-                    if export_checkpoints:
-                        logger.info("Export general checkpoint..")
-                        self.export_general_checkpoint(
-                            optimizer=optimizer,
-                            lr_scheduler=lr_scheduler,
-                            loss=next(m.value for m in metrics if m.name == "loss"),
-                            epoch=epoch,
-                            path=None,
+                    if (
+                        export_checkpoints is not None
+                        and time.time() - t0 >= export_checkpoints * 60
+                    ):
+                        logger.info(
+                            f"Export checkpoint. Next in {export_checkpoints} minutes."
                         )
-                    if epoch == epochs - 1 and export_complete:
-                        logger.info("Export model..")
-                        self.export_state_dict(
-                            export_complete
-                            if isinstance(export_complete, (str, Path))
-                            and export_complete
-                            else None
-                        )
+                        self.export_checkpoint(current_state)
+
+                if (
+                    current_state.phase == "train"
+                    and current_state.epoch == epochs - 1
+                    and export_complete
+                ):
+                    logger.info("Export model..")
+                    self.export_state_dict(
+                        export_complete
+                        if isinstance(export_complete, (str, Path)) and export_complete
+                        else None
+                    )
 
         logger.info("Training complete!")
 
@@ -517,42 +577,84 @@ class Transformer(nn.Module):
                 Defaults to None.
         """
         if path is None:
-            dirs = f"export/{self.__class__.__name__}/state-dicts/"
+            dirs = get_state_dicts_export_path(self)
             os.makedirs(dirs, exist_ok=True)
-            path = f"{dirs}{get_datetime()}.pt"
+            path = dirs / (get_datetime() + ".pt")
         torch.save(self.state_dict(), path)
 
-    def export_general_checkpoint(
+    def export_checkpoint(
         self,
-        optimizer: Optimizer,
-        lr_scheduler: LRScheduler,
-        loss: torch.Tensor,
-        epoch: int,
+        state: _ModelState,
         path: str | Path | None = None,
     ) -> None:
-        """Export a general checkpoint (for Inference and/or Resuming Training).
+        """Export a checkpoint (for Inference and/or Resuming Training).
 
         Args:
-            optimizer (Optimizer): The optimizer used during training.
-            lr_scheduler (LRScheduler): The learning rate scheduler used during training.
-            loss (torch.Tensor): The last loss.
-            epoch (int): The last epoch.
+            state (_ModelState): The state to base the checkpoint on.
             path (str | Path): The path to export to. Should be a .tar file.
                 If None, will export to
-                export/{ClassName}/general-checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}_Epoch-{epoch}.tar
+                export/{ClassName}/checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.tar
                 Defaults to None.
         """
+        if state.optimizer is None or state.lr_scheduler is None:
+            raise ValueError(
+                "Need Optimizer and LRScheduler for exporting a checkpoint."
+            )
         if path is None:
-            dirs = f"export/{self.__class__.__name__}/general-checkpoints/"
+            dirs = get_checkpoint_export_path(self)
             os.makedirs(dirs, exist_ok=True)
-            path = f"{dirs}{get_datetime()}_Epoch-{epoch}.tar"
+            path = dirs / (get_datetime() + ".tar")
         torch.save(
             {
-                "epoch": epoch,
+                "epoch": state.epoch,
+                "phase": state.phase,
+                "batch": state.batch,
                 "model_state_dict": self.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "lr_scheduler_state_dict": lr_scheduler.state_dict(),
-                "loss": loss,
+                "optimizer_state_dict": state.optimizer.state_dict(),
+                "lr_scheduler_state_dict": state.lr_scheduler.state_dict(),
+                "random_seed": self.random_seed,
             },
             path,
         )
+
+    def _load_checkpoint(self) -> Checkpoint:
+        """Scans for checkpoints and loads the selected checkpoint.
+
+        Raises:
+            FileNotFoundError: If no checkpoints could be found.
+
+        Returns:
+            Checkpoint: The loaded checkpoint.
+        """
+        # scan for checkpoints
+        checkpoint_export_path = get_checkpoint_export_path(self)
+        if not os.path.exists(checkpoint_export_path) or not (
+            checkpoints := sorted(glob.glob(f"{str(checkpoint_export_path)}/*.tar"))
+        ):
+            raise FileNotFoundError(
+                "Can't find export/checkpoints folder for loading checkpoints."
+            )
+
+        # print checkpoints
+        print("Available checkpoints:\n")
+        print(
+            "\n".join(
+                f"[{checkpoint_idx}]: {os.path.basename(checkpoint)}"
+                for checkpoint_idx, checkpoint in enumerate(checkpoints)
+            )
+        )
+
+        # wait for user selection
+        while not (
+            selection := input(
+                "Please select a checkpoint by submitting the respective number: "
+            )
+        ).isnumeric() or not 0 <= int(selection) <= len(checkpoints):
+            input("Please select a valid checkpoint!")
+            for _ in range(2):
+                sys.stdout.write("\x1b[1A")  # Move the cursor up one line
+                sys.stdout.write("\x1b[2K")  # Clear the entire line
+            sys.stdout.flush()
+
+        # return
+        return torch.load(checkpoints[int(selection)], weights_only=True)

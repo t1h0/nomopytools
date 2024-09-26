@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from transformers.modeling_outputs import ModelOutput
 from dataclasses import dataclass
 from typing import NamedTuple, Generic, TypeVar, TypedDict
-
+from .globals import Phases
 
 class DataSplit(NamedTuple):
     """DataLoaders for train/validation/test split"""
@@ -35,11 +35,14 @@ class Metric:
     value: float
 
 
-class GeneralCheckpoint(TypedDict):
-    """General checkpoint for ex/import."""
+class Checkpoint(TypedDict):
+    """Checkpoint for ex/import."""
 
     epoch: int
+    phase: Phases
+    batch: int
     model_state_dict: dict
     optimizer_state_dict: dict
     lr_scheduler_state_dict: dict
     loss: float
+    random_seed: int
