@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomopytools"
-version = "0.1.0"
+version = "0.2.0"
 authors = [{ name = "Tilman Hornung", email = "mail@tilmanhornung.de" }]
 description = "Small tools, scripts and modules to extend and simplify programming with python."
 keywords = ["tools"]
@@ -61,7 +61,17 @@ selenium = ["selenium>=3.8", "lxml"]
 mongodb = ["pymongo"]
 mail = ["aiosmtplib"]
 web = ["aiohttp", "lxml"]
-ml = ["torch", "transformers", "tqdm", "numpy", "loguru", "scikit-learn", "bidict","torch-tb-profiler", "tensorboard"]
+ml = [
+    "torch",
+    "transformers",
+    "tqdm",
+    "numpy",
+    "loguru",
+    "scikit-learn",
+    "bidict",
+    "torch-tb-profiler",
+    "tensorboard",
+]
 all = [
     "selenium>=3.8",
     "lxml",
@@ -76,7 +86,7 @@ all = [
     "scikit-learn",
     "bidict",
     "torch-tb-profiler",
-    "tensorboard"
+    "tensorboard",
 ]
 
 
