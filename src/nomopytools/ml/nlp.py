@@ -203,6 +203,8 @@ class SequenceClassifier(TextTransformer):
         batch: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[Metric, ...]:
         """Evaluates one epoch using loss as metric.
 
@@ -365,6 +367,8 @@ class MultiLabelSequenceClassifier(SequenceClassifier, Generic[OutputHeadName]):
         batch: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[Metric, ...]:
         """Evaluates one epoch using loss as metric.
 

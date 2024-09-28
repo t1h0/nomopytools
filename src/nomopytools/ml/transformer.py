@@ -278,9 +278,9 @@ class Transformer(nn.Module):
                 forward call. If None will pass no additional kwargs. Defaults to None.
             epochs (int, optional): Number of epochs to run. Defaults to 4.
             start_epoch (int, optional): The epoch to start with (may be >0 if resuming
-                training). Defaults to 0.
+                training). Irrelevant if start_phase == "test". Defaults to 0.
             start_batch (int, optional): The batch to start with (may be >0 if resuming
-                training). Defaults to 0.
+                training). Irrelevant if start_phase == "test". Defaults to 0.
             start_phase ("train" | "validate" | "test", optional): The phase to start
                 with. Defaults to "train".
             export_checkpoints (int | None, optional): Interval in minutes in which
@@ -293,15 +293,10 @@ class Transformer(nn.Module):
                 If a string or a Path is given, the model is exported to that location.
                 Defaults to False.
         """
-        # states holds model states.
         current_state = None
-
-        # set phases to run
-        phases = PhasesArgs[PhasesArgs.index(start_phase) :]
 
         t0 = time.time()
 
-        # train
         try:
             for current_epoch in tqdm(
                 range(start_epoch, epochs),
@@ -311,14 +306,22 @@ class Transformer(nn.Module):
                 leave=True,
             ):
 
+                phases = PhasesArgs
+                if current_epoch == start_epoch:
+                    phases = phases[phases.index(start_phase) :]
+
                 for current_phase in phases:
                     # iterate over training, validation and test
+
+                    if current_phase == "test" and current_epoch != epochs - 1:
+                        # only test at the end
+                        continue
 
                     # get data
                     data_phase: DataLoader = getattr(data, current_phase)
 
-                    # set start batch
-                    if current_phase != start_phase:
+                    if current_epoch != start_epoch or current_phase != start_phase:
+                        # reset start batch
                         start_batch = 0
 
                     if start_batch >= len(data_phase):
@@ -327,9 +330,11 @@ class Transformer(nn.Module):
                     if current_phase == "train":
                         # set to train mode
                         self.train()
+                        phase_function = self.train_epoch
                     else:
                         # set to eval mode
                         self.eval()
+                        phase_function = self.eval_epoch
 
                     for current_batch, batch in zip(
                         range(start_batch, len(data_phase)),
@@ -345,20 +350,13 @@ class Transformer(nn.Module):
 
                         # iterate over batches
 
-                        if current_phase == "train":
-
-                            metrics = self.train_epoch(
-                                batch,
-                                model_input_keys,
-                                optimizer,
-                                lr_scheduler,
-                                forward_kwargs,
-                            )
-
-                        else:
-                            metrics: tuple[Metric, ...] = getattr(
-                                self, f"{current_phase}_epoch"
-                            )(batch, model_input_keys, forward_kwargs)
+                        metrics = phase_function(
+                            batch=batch,
+                            data_keys=model_input_keys,
+                            optimizer=optimizer,
+                            lr_scheduler=lr_scheduler,
+                            forward_kwargs=forward_kwargs,
+                        )
 
                         # execute and get metric
                         # logger.info(f"Write {step} metric(s) for batch {batch_idx} to tensorboard..")
@@ -401,6 +399,7 @@ class Transformer(nn.Module):
                             and export_complete
                             else None
                         )
+
         except KeyboardInterrupt as e:
             logger.info("Abort!")
             if current_state is not None:
@@ -471,6 +470,8 @@ class Transformer(nn.Module):
         optimizer: Optimizer,
         lr_scheduler: LRScheduler,
         forward_kwargs: dict | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[Metric, ...]:
         """Trains one epoch.
 
@@ -513,59 +514,13 @@ class Transformer(nn.Module):
 
         return (Metric("loss", out),)
 
-    def validate_epoch(
-        self,
-        batch: DataLoader,
-        data_keys: Sequence[str],
-        forward_kwargs: dict | None = None,
-    ) -> tuple[Metric, ...]:
-        """Validates one epoch.
-
-        Args:
-            batch (DataLoader): The batch to train on.
-            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
-                to pass it to forward call with.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-
-        Returns:
-            tuple[Metric,...]: The loss.
-        """
-        return self.eval_epoch(
-            batch=batch,
-            data_keys=data_keys,
-            forward_kwargs=forward_kwargs,
-        )
-
-    def test_epoch(
-        self,
-        batch: DataLoader,
-        data_keys: Sequence[str],
-        forward_kwargs: dict | None = None,
-    ) -> tuple[Metric, ...]:
-        """Tests one epoch.
-
-        Args:
-            batch (DataLoader): The batch to train on.
-            data_keys (Sequence[str]): Keys of each data Tensor that the dataloader yields
-                to pass it to forward call with.
-            forward_kwargs (dict | None, optional): Additional kwargs to pass to
-                forward call. If None will pass no additional kwargs. Defaults to None.
-
-        Returns:
-            tuple[Metric,...]: The loss.
-        """
-        return self.eval_epoch(
-            batch=batch,
-            data_keys=data_keys,
-            forward_kwargs=forward_kwargs,
-        )
-
     def eval_epoch(
         self,
         batch: DataLoader,
         data_keys: Sequence[str],
         forward_kwargs: dict | None = None,
+        *args,
+        **kwargs,
     ) -> tuple[Metric, ...]:
         """Evaluates one epoch using loss as metric.
 
