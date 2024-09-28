@@ -40,11 +40,13 @@ class Transformer(nn.Module):
 
     @dataclass
     class _ModelState:
-        optimizer: Optimizer | None = None
-        lr_scheduler: LRScheduler | None = None
-        epoch: int = 0
-        phase: Phases = "train"
-        batch: int = 0
+        """Stores the current model state AFTER having performed batch of epoch of phase."""
+
+        optimizer_state_dict: dict | None = None
+        lr_scheduler_state_dict: dict | None = None
+        epoch: int | None = 0
+        phase: Phases | None = None
+        batch: int | None = None
 
     def __init__(
         self,
@@ -230,6 +232,7 @@ class Transformer(nn.Module):
         )
 
         # load checkpoint
+        self.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
 
@@ -290,11 +293,8 @@ class Transformer(nn.Module):
                 If a string or a Path is given, the model is exported to that location.
                 Defaults to False.
         """
-
-        current_state = self._ModelState(
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-        )
+        # states holds model states.
+        current_state = None
 
         # set phases to run
         phases = PhasesArgs[PhasesArgs.index(start_phase) :]
@@ -302,93 +302,112 @@ class Transformer(nn.Module):
         t0 = time.time()
 
         # train
+        try:
+            for current_epoch in tqdm(
+                range(start_epoch, epochs),
+                desc="Epochs",
+                unit="epoch",
+                position=0,
+                leave=True,
+            ):
 
-        for current_state.epoch in tqdm(
-            range(start_epoch, epochs),
-            desc="Epochs",
-            unit="epoch",
-            position=0,
-            leave=True,
-        ):
+                for current_phase in phases:
+                    # iterate over training, validation and test
 
-            for current_state.phase in phases:
-                # iterate over training, validation and test
+                    # get data
+                    data_phase: DataLoader = getattr(data, current_phase)
 
-                # get data
-                data_phase: DataLoader = getattr(data, current_state.phase)
+                    # set start batch
+                    if current_phase != start_phase:
+                        start_batch = 0
 
-                # set start batch
-                if current_state.phase != start_phase:
-                    start_batch = 0
+                    if start_batch >= len(data_phase):
+                        continue
 
-                if start_batch >= len(data_phase):
-                    continue
-
-                if current_state.phase == "train":
-                    # set to train mode
-                    self.train()
-                else:
-                    # set to eval mode
-                    self.eval()
-
-                for current_state.batch, batch in enumerate(
-                    tqdm(
-                        islice(data_phase, start_batch, None),
-                        position=1,
-                        desc=f"Batch {current_state.phase}",
-                        unit="batch",
-                        leave=False,
-                        total=len(data_phase) - start_batch,
-                    )
-                ):
-
-                    # iterate over batches
-
-                    if current_state.phase == "train":
-
-                        metrics = self.train_epoch(
-                            batch,
-                            model_input_keys,
-                            optimizer,
-                            lr_scheduler,
-                            forward_kwargs,
-                        )
-
+                    if current_phase == "train":
+                        # set to train mode
+                        self.train()
                     else:
-                        metrics: tuple[Metric, ...] = getattr(
-                            self, f"{current_state.phase}_epoch"
-                        )(batch, model_input_keys, forward_kwargs)
+                        # set to eval mode
+                        self.eval()
 
-                    # execute and get metric
-                    # logger.info(f"Write {step} metric(s) for batch {batch_idx} to tensorboard..")
-                    for metric in metrics:
-                        # log to tensorboard
-                        self.tensorboard_writer.add_scalar(
-                            f"{current_state.phase} {metric.name}",
-                            metric.value,
-                            current_state.epoch * len(data_phase) + current_state.batch,
+                    for current_batch, batch in zip(
+                        range(start_batch, len(data_phase)),
+                        tqdm(
+                            islice(data_phase, start_batch, None),
+                            position=1,
+                            desc=f"Batch {current_phase}",
+                            unit="batch",
+                            leave=False,
+                            total=len(data_phase) - start_batch,
+                        ),
+                    ):
+
+                        # iterate over batches
+
+                        if current_phase == "train":
+
+                            metrics = self.train_epoch(
+                                batch,
+                                model_input_keys,
+                                optimizer,
+                                lr_scheduler,
+                                forward_kwargs,
+                            )
+
+                        else:
+                            metrics: tuple[Metric, ...] = getattr(
+                                self, f"{current_phase}_epoch"
+                            )(batch, model_input_keys, forward_kwargs)
+
+                        # execute and get metric
+                        # logger.info(f"Write {step} metric(s) for batch {batch_idx} to tensorboard..")
+                        for metric in metrics:
+                            # log to tensorboard
+                            self.tensorboard_writer.add_scalar(
+                                f"{current_phase} {metric.name}",
+                                metric.value,
+                                current_epoch * len(data_phase) + current_batch,
+                            )
+
+                        # save current state
+                        current_state = Transformer._ModelState(
+                            optimizer_state_dict=optimizer.state_dict(),
+                            lr_scheduler_state_dict=lr_scheduler.state_dict(),
+                            epoch=current_epoch,
+                            phase=current_phase,
+                            batch=current_batch,
                         )
+
+                        if (
+                            export_checkpoints is not None
+                            and time.time() - t0 >= export_checkpoints * 60
+                        ):
+                            t0 = time.time()
+                            logger.info(
+                                f"Export checkpoint. Next in {export_checkpoints} minutes."
+                            )
+                            self.export_checkpoint(current_state)
 
                     if (
-                        export_checkpoints is not None
-                        and time.time() - t0 >= export_checkpoints * 60
+                        current_phase == "train"
+                        and current_epoch == epochs - 1
+                        and export_complete
                     ):
-                        logger.info(
-                            f"Export checkpoint. Next in {export_checkpoints} minutes."
+                        logger.info("Export model..")
+                        self.export_state_dict(
+                            export_complete
+                            if isinstance(export_complete, (str, Path))
+                            and export_complete
+                            else None
                         )
-                        self.export_checkpoint(current_state)
-
-                if (
-                    current_state.phase == "train"
-                    and current_state.epoch == epochs - 1
-                    and export_complete
-                ):
-                    logger.info("Export model..")
-                    self.export_state_dict(
-                        export_complete
-                        if isinstance(export_complete, (str, Path)) and export_complete
-                        else None
-                    )
+        except KeyboardInterrupt as e:
+            logger.info("Abort!")
+            if current_state is not None:
+                self.export_checkpoint(current_state)
+                logger.info("Checkpoint successfully exported.")
+                sys.exit(0)
+            raise e
 
         logger.info("Training complete!")
 
@@ -596,7 +615,7 @@ class Transformer(nn.Module):
                 export/{ClassName}/checkpoints/{yyyy}-{mm}-{dd}_{hh}-{mm}-{ss}-{ms}.tar
                 Defaults to None.
         """
-        if state.optimizer is None or state.lr_scheduler is None:
+        if state.optimizer_state_dict is None or state.lr_scheduler_state_dict is None:
             raise ValueError(
                 "Need Optimizer and LRScheduler for exporting a checkpoint."
             )
@@ -610,8 +629,8 @@ class Transformer(nn.Module):
                 "phase": state.phase,
                 "batch": state.batch,
                 "model_state_dict": self.state_dict(),
-                "optimizer_state_dict": state.optimizer.state_dict(),
-                "lr_scheduler_state_dict": state.lr_scheduler.state_dict(),
+                "optimizer_state_dict": state.optimizer_state_dict,
+                "lr_scheduler_state_dict": state.lr_scheduler_state_dict,
                 "random_seed": self.random_seed,
             },
             path,
