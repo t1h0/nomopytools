@@ -619,11 +619,13 @@ class Transformer(nn.Module):
         )
 
         # wait for user selection
-        while not (
+        while (
             selection := input(
-                "Please select a checkpoint by submitting the respective number: "
+                f"Please select a checkpoint by submitting the respective number (default: {len(checkpoints)-1}): "
             )
-        ).isnumeric() or not 0 <= int(selection) <= len(checkpoints):
+        ) != "" and (
+            not selection.isnumeric() or not 0 <= int(selection) <= len(checkpoints)
+        ):
             input("Please select a valid checkpoint!")
             for _ in range(2):
                 sys.stdout.write("\x1b[1A")  # Move the cursor up one line
@@ -631,4 +633,8 @@ class Transformer(nn.Module):
             sys.stdout.flush()
 
         # return
-        return torch.load(checkpoints[int(selection)], weights_only=True)
+        selection = int(selection or (len(checkpoints) - 1))
+        logger.info(
+            f"Loading checkpoint {selection}: {os.path.basename(checkpoints[selection])}"
+        )
+        return torch.load(checkpoints[selection], weights_only=True)
