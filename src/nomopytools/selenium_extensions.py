@@ -4,6 +4,7 @@ from lxml.etree import (
     HTMLParser as etreeHTMLParser,
 )
 from lxml.html.soupparser import fromstring as lxmlsoup
+from lxml.html import HtmlElement
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.expected_conditions import (
     element_to_be_clickable,
@@ -45,8 +46,10 @@ class _SeleniumExtended:
             text=self.page_source, parser=etreeHTMLParser(remove_comments=True)
         )
 
-    def get_xp_tree_soup(self):
-        return lxmlsoup(self.page_source)
+    def get_xp_tree_soup(self) -> HtmlElement:
+        tree = lxmlsoup(self.page_source)
+        assert tree is not None
+        return tree
 
     def get_elem_xp(self, xpath: str, timeout: int = 10):
         if timeout not in self.waits:
