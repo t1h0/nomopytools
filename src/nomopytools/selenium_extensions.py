@@ -23,7 +23,7 @@ from selenium.common.exceptions import (
     TimeoutException as SeleniumTimeout,
 )
 from asyncio import sleep as sleep_async
-import warnings
+from loguru import logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
 from typing import Any
@@ -86,7 +86,7 @@ class _SeleniumExtended:
                 self.get(url)
                 return
             except WebDriverException:
-                warnings.warn(
+                logger.warning(
                     f"Couldn't get {url}. Waiting {sleep} seconds for try #{r+1}/{retries}"
                 )
                 if a_sync:
