@@ -27,8 +27,7 @@ from asyncio import sleep as sleep_async
 from loguru import logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
-from typing import Any
-
+from typing import Any, Union
 
 class _SeleniumExtended:
     def __init__(self, **kwargs) -> None:
@@ -178,3 +177,5 @@ class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
         chrome_kwargs["options"] = options
         Chrome.__init__(self, **chrome_kwargs)
         _SeleniumExtended.__init__(self)
+
+ExtendedSeleniumDriver = Union[SeleniumExtendedChrome, SeleniumExtendedFirefox]
