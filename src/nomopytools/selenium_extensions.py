@@ -27,7 +27,8 @@ from asyncio import sleep as sleep_async
 from loguru import logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
-from typing import Any, Union
+from typing import Any, Union, Self
+
 
 class _SeleniumExtended:
     def __init__(self, **kwargs) -> None:
@@ -39,6 +40,18 @@ class _SeleniumExtended:
                 from one of those two classes."
             )
         self.waits = {}
+
+    def __getitem__(self, key: str) -> Self:
+        """Selects a window by name or handle.
+
+        Args:
+            key (str): The name or handle of the window to switch to.
+
+        Returns:
+            Self: The driver.
+        """
+        self.switch_to.window(str)
+        return self
 
     def get_xp_tree(self) -> etreeElement:
         return etreeHTML(
