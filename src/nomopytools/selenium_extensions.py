@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from lxml.etree import (
     HTML as etreeHTML,
     _Element as etreeElement,
@@ -36,22 +37,10 @@ class _SeleniumExtended:
             raise ImportError(
                 "SeleniumExtended can only act as a superclass \
                 for instances of webdriver.Firefox or webdriver.Chrome. \
-                To inherit from SeleniumExtended, make sure to also inherit \
+                To inherit from _SeleniumExtended, make sure to also inherit \
                 from one of those two classes."
             )
         self.waits = {}
-
-    def __getitem__(self, key: str) -> Self:
-        """Selects a window by name or handle.
-
-        Args:
-            key (str): The name or handle of the window to switch to.
-
-        Returns:
-            Self: The driver.
-        """
-        self.switch_to.window(str)
-        return self
 
     def get_xp_tree(self) -> etreeElement:
         return etreeHTML(
@@ -126,6 +115,16 @@ class _SeleniumExtended:
                     except SeleniumTimeout as f:
                         if j == retries - 1:
                             raise f
+    
+    @contextmanager
+    def maintain_window(self, window: str | None = None):
+        current_window = self.current_window_handle
+        if window:
+            self.switch_to.window(window)
+        try:
+            yield current_window
+        finally:
+            self.switch_to.window(current_window)
 
 
 class SeleniumExtendedFirefox(Firefox, _SeleniumExtended):
