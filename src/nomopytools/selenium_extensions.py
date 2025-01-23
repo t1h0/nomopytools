@@ -69,21 +69,28 @@ class _SeleniumExtended:
             self.waits[timeout] = WebDriverWait(self, timeout)
         return self.waits[timeout].until(invisibility_of_element(element))
 
-    async def get_elem_xp_tree(
-        self, xpath: str, wait: int = 1, timeout: int | None = None, a_sync: bool = True
+    def get_elem_xp_tree(
+        self, xpath: str, wait: int = 1, timeout: int | None = None
     ) -> list:
         t1 = time()
         while not (elem := (self.get_xp_tree()).xpath(xpath)):
             if timeout and (time() - t1 >= timeout):
                 raise SeleniumTimeout
-            if a_sync:
-                await sleep_async(wait)
-            else:
-                sleep_sync(wait)
+            sleep_sync(wait)
         return elem
 
-    async def get_retry(
-        self, url: str, sleep: float = 30, retries: int = 6, a_sync: bool = True
+    async def get_elem_xp_tree_async(
+        self, xpath: str, wait: int = 1, timeout: int | None = None
+    ) -> list:
+        t1 = time()
+        while not (elem := (self.get_xp_tree()).xpath(xpath)):
+            if timeout and (time() - t1 >= timeout):
+                raise SeleniumTimeout
+            await self.sleep(wait)
+        return elem
+
+    def get_retry(
+        self, url: str, wait: float = 30, retries: int = 6
     ) -> None:
         for r in range(retries):
             try:
@@ -91,12 +98,23 @@ class _SeleniumExtended:
                 return
             except WebDriverException:
                 logger.warning(
-                    f"Couldn't get {url}. Waiting {sleep} seconds for try #{r+1}/{retries}"
+                    f"Couldn't get {url}. Waiting {wait} seconds for try #{r+1}/{retries}"
                 )
-                if a_sync:
-                    await sleep_async(sleep)
-                else:
-                    sleep_sync(sleep)
+                sleep_sync(wait)
+        raise WebDriverException
+
+    async def get_retry_async(
+        self, url: str, wait: float = 30, retries: int = 6
+    ) -> None:
+        for r in range(retries):
+            try:
+                self.get(url)
+                return
+            except WebDriverException:
+                logger.warning(
+                    f"Couldn't get {url}. Waiting {wait} seconds for try #{r+1}/{retries}"
+                )
+                await self.sleep(wait)
         raise WebDriverException
 
     def cascade(self, *xpath: str, retries: int = 3):
@@ -115,6 +133,10 @@ class _SeleniumExtended:
                     except SeleniumTimeout as f:
                         if j == retries - 1:
                             raise f
+                        
+    async def sleep(self, seconds: float) -> None:
+        with self.maintain_window():
+            await sleep_async(seconds)
     
     @contextmanager
     def maintain_window(self, window: str | None = None):
