@@ -28,7 +28,7 @@ from asyncio import sleep as sleep_async
 from loguru import logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
-from typing import Any, Union, Self
+from typing import Any, Literal, Union
 
 
 class _SeleniumExtended:
@@ -89,9 +89,7 @@ class _SeleniumExtended:
             await self.sleep(wait)
         return elem
 
-    def get_retry(
-        self, url: str, wait: float = 30, retries: int = 6
-    ) -> None:
+    def get_retry(self, url: str, wait: float = 30, retries: int = 6) -> None:
         for r in range(retries):
             try:
                 self.get(url)
@@ -133,20 +131,35 @@ class _SeleniumExtended:
                     except SeleniumTimeout as f:
                         if j == retries - 1:
                             raise f
-                        
+
     async def sleep(self, seconds: float) -> None:
         with self.maintain_window():
             await sleep_async(seconds)
-    
+
     @contextmanager
     def maintain_window(self, window: str | None = None):
-        current_window = self.current_window_handle
+        original_window = self.current_window_handle
         if window:
             self.switch_to.window(window)
         try:
-            yield current_window
+            yield original_window
         finally:
-            self.switch_to.window(current_window)
+            self.switch_to.window(original_window)
+
+    @contextmanager
+    def own_window(
+        self, typ: Literal["tab", "window"] = "tab", close_after: bool = False
+    ):
+        original_window = self.current_window_handle
+        self.switch_to.new_window(typ)
+        new_window = self.current_window_handle
+        try:
+            yield new_window
+        finally:
+            if close_after:
+                self.switch_to.window(new_window)
+                self.close()
+            self.switch_to.window(original_window)
 
 
 class SeleniumExtendedFirefox(Firefox, _SeleniumExtended):
@@ -211,5 +224,6 @@ class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
         chrome_kwargs["options"] = options
         Chrome.__init__(self, **chrome_kwargs)
         _SeleniumExtended.__init__(self)
+
 
 ExtendedSeleniumDriver = Union[SeleniumExtendedChrome, SeleniumExtendedFirefox]
