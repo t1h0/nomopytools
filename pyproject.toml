@@ -57,7 +57,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-selenium = ["selenium>=3.8", "lxml"]
+selenium = ["selenium>=3.8", "lxml", "beautifulsoup4"]
 mongodb = ["pymongo"]
 mail = ["aiosmtplib"]
 web = ["aiohttp", "lxml"]
@@ -87,6 +87,7 @@ all = [
     "bidict",
     "torch-tb-profiler",
     "tensorboard",
+    "beautifulsoup4",
 ]
 
 

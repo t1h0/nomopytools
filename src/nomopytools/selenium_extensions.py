@@ -1,11 +1,11 @@
-from contextlib import contextmanager
+# third-party imports
 from lxml.etree import (
     HTML as etreeHTML,
     _Element as etreeElement,
     HTMLParser as etreeHTMLParser,
 )
-from lxml.html.soupparser import fromstring as lxmlsoup
 from lxml.html import HtmlElement
+from bs4 import BeautifulSoup
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.expected_conditions import (
     element_to_be_clickable,
@@ -24,6 +24,9 @@ from selenium.common.exceptions import (
     WebDriverException,
     TimeoutException as SeleniumTimeout,
 )
+
+# built-in imports
+from contextlib import contextmanager
 from asyncio import sleep as sleep_async
 from loguru import logger
 from os.path import dirname as dirname
@@ -35,10 +38,10 @@ class _SeleniumExtended:
     def __init__(self, **kwargs) -> None:
         if not any((isinstance(self, Firefox), isinstance(self, Chrome))):
             raise ImportError(
-                "SeleniumExtended can only act as a superclass \
-                for instances of webdriver.Firefox or webdriver.Chrome. \
-                To inherit from _SeleniumExtended, make sure to also inherit \
-                from one of those two classes."
+                "SeleniumExtended can only act as a superclass"
+                " for instances of webdriver.Firefox or webdriver.Chrome."
+                " To inherit from _SeleniumExtended, make sure to also inherit"
+                " from one of those two classes."
             )
         self.waits = {}
 
@@ -48,7 +51,7 @@ class _SeleniumExtended:
         )
 
     def get_xp_tree_soup(self) -> HtmlElement:
-        tree = lxmlsoup(self.page_source)
+        tree = etreeHTML(str(BeautifulSoup(self.page_source, "lxml")))
         assert tree is not None
         return tree
 
@@ -207,21 +210,28 @@ class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
             options = chrome_kwargs["options"]
         else:
             options = ChromeOptions()
+            
         if headless:
             if hl_index := next(
                 i for i, v in enumerate(options.arguments) if v.startswith("--headless")
             ):
                 options.arguments.pop(hl_index)
             options.add_argument("--headless=new")
+            
         if user_agent is not None:
             if ua_index := next(
-                i
-                for i, v in enumerate(options.arguments)
-                if v.startswith("--user-agent")
+                (
+                    i
+                    for i, v in enumerate(options.arguments)
+                    if v.startswith("--user-agent")
+                ),
+                None,
             ):
                 options.arguments.pop(ua_index)
             options.add_argument(f"--user-agent={user_agent}")
+            
         chrome_kwargs["options"] = options
+        
         Chrome.__init__(self, **chrome_kwargs)
         _SeleniumExtended.__init__(self)
 

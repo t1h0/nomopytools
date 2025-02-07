@@ -1,4 +1,5 @@
 selenium>=3.8
+beautifulsoup4
 lxml
 pymongo
 aiosmtplib
