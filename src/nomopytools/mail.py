@@ -39,7 +39,9 @@ class Mailer:
                 If None is given, user input will be used. Defaults to None.
 
         """
-        self.pw = pw or getpass(f"Input password for IMAP and SMTP Connection of user {user}: ")
+        self.pw = pw or getpass(
+            f"Input password for IMAP and SMTP Connection of user {user}: "
+        )
         self.user = user
         self.imap_host = imap_host
         self.imap_port = imap_port
@@ -224,6 +226,12 @@ class Mailer:
     async def smtp_send(
         self, *mails: Mail
     ) -> list[tuple[dict[str, SMTPResponse], str]]:
+        """Send mails via SMTP.
+
+        Returns:
+            list[tuple[dict[str, SMTPResponse], str]]: List of one aiosmtplib response
+                per mail.
+        """
         email_messages = []
         for mail in mails:
             email_message = EmailMessage(smtp_policy)
