@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomopytools"
-version = "0.4.4"
+version = "0.5.0"
 authors = [{ name = "Tilman Hornung", email = "mail@tilmanhornung.de" }]
 description = "Small tools, scripts and modules to extend and simplify programming with python."
 keywords = ["tools"]
@@ -72,6 +72,7 @@ ml = [
     "torch-tb-profiler",
     "tensorboard",
 ]
+security = ["cryptography"]
 all = [
     "selenium>=3.8",
     "lxml",
@@ -88,6 +89,7 @@ all = [
     "torch-tb-profiler",
     "tensorboard",
     "beautifulsoup4",
+    "cryptography",
 ]
 
 
