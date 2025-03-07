@@ -20,9 +20,12 @@ from selenium.webdriver import (
     Chrome,
     ChromeOptions,
 )
+from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.remote.shadowroot import ShadowRoot
 from selenium.common.exceptions import (
     WebDriverException,
     TimeoutException as SeleniumTimeout,
+    NoSuchElementException,
 )
 
 # built-in imports
@@ -31,7 +34,8 @@ from asyncio import sleep as sleep_async
 from loguru import logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
-from typing import Any, Literal, Union
+from typing import Any, Literal, Union, Callable, overload
+import warnings
 
 
 class _SeleniumExtended:
@@ -45,52 +49,173 @@ class _SeleniumExtended:
             )
         self.waits = {}
 
-    def get_xp_tree(self) -> etreeElement:
+    def get_xp_tree(self, soup: bool = False) -> etreeElement:
         return etreeHTML(
-            text=self.page_source, parser=etreeHTMLParser(remove_comments=True)
+            text=(
+                str(BeautifulSoup(self.page_source, "lxml"))
+                if soup
+                else self.page_source
+            ),
+            parser=etreeHTMLParser(remove_comments=True),
         )
 
     def get_xp_tree_soup(self) -> HtmlElement:
-        tree = etreeHTML(str(BeautifulSoup(self.page_source, "lxml")))
-        assert tree is not None
-        return tree
+        warnings.warn(DeprecationWarning("Use get_xp_tree(soup=True) instead."))
+        return self.get_xp_tree(soup=True)
 
-    def get_elem_xp(self, xpath: str, timeout: int = 10):
+    def get_elem_xp(self, xpath: str, timeout: int = 10) -> WebElement:
         if timeout not in self.waits:
             self.waits[timeout] = WebDriverWait(self, timeout)
         return self.waits[timeout].until(element_to_be_clickable((By.XPATH, xpath)))
 
-    def wait_until_invisible_xp(self, xpath: str, timeout: int = 10):
+    def wait_until_invisible_xp(self, xpath: str, timeout: int = 10) -> WebElement:
         if timeout not in self.waits:
             self.waits[timeout] = WebDriverWait(self, timeout)
         return self.waits[timeout].until(
             invisibility_of_element_located((By.XPATH, xpath))
         )
 
-    def wait_until_invisible(self, element: etreeElement, timeout: int = 10):
+    def wait_until_invisible(
+        self, element: etreeElement, timeout: int = 10
+    ) -> WebElement:
         if timeout not in self.waits:
             self.waits[timeout] = WebDriverWait(self, timeout)
         return self.waits[timeout].until(invisibility_of_element(element))
 
-    def get_elem_xp_tree(
-        self, xpath: str, wait: int = 1, timeout: int | None = None
-    ) -> list:
-        t1 = time()
-        while not (elem := (self.get_xp_tree()).xpath(xpath)):
-            if timeout and (time() - t1 >= timeout):
-                raise SeleniumTimeout
-            sleep_sync(wait)
-        return elem
+    async def get_elem_xp_tree(
+        self,
+        xpath: str,
+        timeout: int | None = None,
+        wait: int | None = None,
+        soup: bool = False,
+    ) -> list[etreeElement]:
+        return await self.timeout(
+            func=lambda: self.get_xp_tree(soup=soup).xpath(xpath),
+            timeout=timeout,
+            wait=wait,
+        )
 
-    async def get_elem_xp_tree_async(
-        self, xpath: str, wait: int = 1, timeout: int | None = None
-    ) -> list:
+    @overload
+    async def get_elem_js(
+        self,
+        selector: str,
+        timeout: int | None = None,
+        wait: int | None = None,
+        select_all: Literal[False] = False,
+    ) -> WebElement: ...
+
+    @overload
+    async def get_elem_js(
+        self,
+        selector: str,
+        timeout: int | None = None,
+        wait: int | None = None,
+        select_all: Literal[True] = ...,
+    ) -> list[WebElement]: ...
+
+    async def get_elem_js(
+        self,
+        selector: str,
+        timeout: int | None = None,
+        wait: int | None = None,
+        select_all: bool = False,
+    ) -> WebElement | list[WebElement]:
+        return await self.timeout(
+            func=lambda: self.execute_script(
+                f"return document.querySelector{"All" if select_all else ""}('{selector}');"
+            ),
+            timeout=timeout,
+            wait=wait,
+        )
+
+    @overload
+    async def get_shadowed_elem(
+        self,
+        shadow_root_selector: str,
+        elem_css_selector: str,
+        get_all: Literal[True] = True,
+        timeout: int | None = None,
+        wait: int | None = None,
+    ) -> list[WebElement]: ...
+
+    @overload
+    async def get_shadowed_elem(
+        self,
+        shadow_root_selector: str,
+        elem_css_selector: str,
+        get_all: Literal[False] = ...,
+        timeout: int | None = None,
+        wait: int | None = None,
+    ) -> WebElement: ...
+
+    async def get_shadowed_elem(
+        self,
+        shadow_root_selector: str,
+        elem_css_selector: str,
+        get_all: bool = True,
+        timeout: int | None = None,
+        wait: int | None = None,
+    ) -> list[WebElement] | WebElement:
+        shadow_root = await self.get_elem_js(
+            selector=shadow_root_selector, timeout=timeout, wait=wait
+        ).shadow_root
+        return await self.timeout(
+            lambda: self.search_shadow_root(
+                shadow_root=shadow_root,
+                elem_css_selector=elem_css_selector,
+                get_all=get_all,
+            ),
+            timeout=timeout,
+            wait=wait,
+        )
+
+    @overload
+    def search_shadow_root(
+        self,
+        shadow_root: ShadowRoot,
+        elem_css_selector: str,
+        get_all: Literal[True] = True,
+    ) -> list[WebElement]: ...
+    @overload
+    def search_shadow_root(
+        self,
+        shadow_root: ShadowRoot,
+        elem_css_selector: str,
+        get_all: Literal[False] = ...,
+    ) -> WebElement | None: ...
+
+    def search_shadow_root(
+        self, shadow_root: ShadowRoot, elem_css_selector: str, get_all: bool = True
+    ) -> list[WebElement] | WebElement | None:
+        try:
+            return (shadow_root.find_elements if get_all else shadow_root.find_element)(
+                By.CSS_SELECTOR, elem_css_selector
+            )
+        except NoSuchElementException:
+            return [] if get_all else None
+
+    async def timeout(
+        self, func: Callable, timeout: int | None = None, wait: int | None = None
+    ) -> Any:
+        if timeout is None:
+            timeout = 0
+
         t1 = time()
-        while not (elem := (self.get_xp_tree()).xpath(xpath)):
-            if timeout and (time() - t1 >= timeout):
+        while not (result := func()):
+            if time() - t1 >= timeout:
                 raise SeleniumTimeout
-            await self.sleep(wait)
-        return elem
+            self.sleep(1 if wait is None else wait)
+        return result
+
+    # async def get_elem_xp_tree_async(
+    #     self, xpath: str, timeout: int | None = None, wait: int = 1, soup: bool = False
+    # ) -> list:
+    #     t1 = time()
+    #     while not (elem := (self.get_xp_tree(soup=soup)).xpath(xpath)):
+    #         if timeout and (time() - t1 >= timeout):
+    #             raise SeleniumTimeout
+    #         await self.sleep(wait)
+    #     return elem
 
     def get_retry(self, url: str, wait: float = 30, retries: int = 6) -> None:
         for r in range(retries):
@@ -210,14 +335,14 @@ class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
             options = chrome_kwargs["options"]
         else:
             options = ChromeOptions()
-            
+
         if headless:
             if hl_index := next(
                 i for i, v in enumerate(options.arguments) if v.startswith("--headless")
             ):
                 options.arguments.pop(hl_index)
             options.add_argument("--headless=new")
-            
+
         if user_agent is not None:
             if ua_index := next(
                 (
@@ -229,9 +354,9 @@ class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
             ):
                 options.arguments.pop(ua_index)
             options.add_argument(f"--user-agent={user_agent}")
-            
+
         chrome_kwargs["options"] = options
-        
+
         Chrome.__init__(self, **chrome_kwargs)
         _SeleniumExtended.__init__(self)
 
