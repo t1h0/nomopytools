@@ -13,3 +13,5 @@ scikit-learn
 bidict
 torch-tb-profiler
 cryptography
+black==25.1.0
+pre-commit==4.1.0

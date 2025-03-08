@@ -98,3 +98,6 @@ changelog = "https://github.com/t1h0/nomopytools/releases"
 issues = "https://github.com/t1h0/nomopytools/issues"
 homepage = "https://github.com/t1h0/nomopytools"
 repository = "https://github.com/t1h0/nomopytools"
+
+[tool.black]
+required-version = "25.1.0"
