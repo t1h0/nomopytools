@@ -7,18 +7,18 @@ from lxml.etree import (
 from bs4 import BeautifulSoup
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.expected_conditions import (
+    D,
     element_to_be_clickable,
     invisibility_of_element_located,
     invisibility_of_element,
+    visibility_of_element_located,
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver import (
     Firefox,
-    FirefoxOptions,
-    FirefoxProfile,
     Chrome,
-    ChromeOptions,
 )
+from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.shadowroot import ShadowRoot
 from selenium.common.exceptions import (
@@ -28,27 +28,36 @@ from selenium.common.exceptions import (
 )
 
 # built-in imports
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from asyncio import sleep as sleep_async
 from loguru import logger
 from os.path import dirname as dirname
 from time import time, sleep as sleep_sync
-from typing import Any, Literal, Union, Callable, overload, TypeVar
+from typing import Literal, Callable, overload, TypeVar
 import warnings
+from random import gauss, expovariate
 
 T = TypeVar("T")
 
 
 class _SeleniumExtended:
-    def __init__(self, **kwargs) -> None:
-        """Extended Selenium Driver Superclass"""
-        if not any((isinstance(self, Firefox), isinstance(self, Chrome))):
+
+    _MEAN_REACTION_TIME = 1.5
+    """Mean reaction time for humanoid reaction behavior."""
+    _MINIMUM_TYPING_DELAY = 0.035
+    """Minimum delay between typing characters for humanoid typing behavior."""
+
+    def __init__(self) -> None:
+        """Extended Selenium Driver Superclass."""
+        if not (isinstance(self, Firefox | Chrome)):
             raise ImportError(
                 "SeleniumExtended can only act as a superclass"
                 " for instances of webdriver.Firefox or webdriver.Chrome."
                 " To inherit from _SeleniumExtended, make sure to also inherit"
                 " from one of those two classes."
             )
+        self.last_interaction: float = 0
+        """Timestamp of the last interaction with the browser"""
 
     def get_xp_tree(self, soup: bool = False) -> etreeElement:
         """Get the current xpath tree.
@@ -73,7 +82,34 @@ class _SeleniumExtended:
         warnings.warn(DeprecationWarning("Use get_xp_tree(soup=True) instead."))
         return self.get_xp_tree(soup=True)
 
-    def get_elem_xp(self, xpath: str, timeout: int = 10) -> WebElement:
+    @overload
+    def get_elem_xp(
+        self,
+        xpath: str,
+        timeout: int = 10,
+        method: Callable[
+            ..., Callable[[D], Literal[False] | WebElement]
+        ] = element_to_be_clickable,
+    ) -> "ExtendedWebElement": ...
+
+    @overload
+    def get_elem_xp(
+        self,
+        xpath: str,
+        timeout: int = 10,
+        method: Callable[
+            ..., Callable[[D], Literal[False] | T]
+        ] = element_to_be_clickable,
+    ) -> T: ...
+
+    def get_elem_xp(
+        self,
+        xpath: str,
+        timeout: int = 10,
+        method: Callable[
+            ..., Callable[[D], Literal[False] | T]
+        ] = element_to_be_clickable,
+    ) -> "T | ExtendedWebElement":
         """Get an element using xpath.
 
         Args:
@@ -83,8 +119,17 @@ class _SeleniumExtended:
         Returns:
             WebElement: The element.
         """
-        return WebDriverWait(self, timeout).until(
-            element_to_be_clickable((By.XPATH, xpath))
+        out = WebDriverWait(self, timeout).until(method((By.XPATH, xpath)))
+
+        return ExtendedWebElement(out) if isinstance(out, WebElement) else out
+
+    def get_elem_xp_humanoid(
+        self,
+        xpath: str,
+        timeout: int = 10,
+    ) -> "ExtendedWebElement":
+        return self.get_elem_xp(
+            xpath=xpath, timeout=timeout, method=visibility_of_element_located
         )
 
     def wait_until_invisible_xp(
@@ -201,25 +246,25 @@ class _SeleniumExtended:
         elem_css_selector: str,
         get_all: Literal[True] = True,
         timeout: int | None = None,
-    ) -> list[WebElement]: ...
+    ) -> "list[ExtendedWebElement]": ...
 
     @overload
     async def get_shadowed_elem(
         self,
         shadow_root_selector: str,
         elem_css_selector: str,
-        get_all: Literal[False] = ...,
+        get_all: Literal[False],
         timeout: None = None,
-    ) -> WebElement | None: ...
+    ) -> "ExtendedWebElement | None": ...
 
     @overload
     async def get_shadowed_elem(
         self,
         shadow_root_selector: str,
         elem_css_selector: str,
-        get_all: Literal[False] = ...,
-        timeout: int = ...,
-    ) -> WebElement: ...
+        get_all: Literal[False],
+        timeout: int,
+    ) -> "ExtendedWebElement": ...
 
     async def get_shadowed_elem(
         self,
@@ -227,7 +272,7 @@ class _SeleniumExtended:
         elem_css_selector: str,
         get_all: bool = True,
         timeout: int | None = None,
-    ) -> list[WebElement] | WebElement | None:
+    ) -> "list[ExtendedWebElement] | ExtendedWebElement | None":
         """Get an element inside a shadow root.
 
         Args:
@@ -240,16 +285,19 @@ class _SeleniumExtended:
                 Defaults to None.
 
         Returns:
-            list[WebElement] | WebElement | None: The matched element(s) or None if
-                None was found.
+            list[ExtendedWebElement] | ExtendedWebElement | None: The matched element(s)
+                or None if None was found.
         """
-        shadow_root = (
-            await self.get_elem_js(
-                selector=shadow_root_selector, timeout=timeout, get_all=False
-            )
-        ).shadow_root
+        shadow_root = await self.get_elem_js(
+            selector=shadow_root_selector, timeout=timeout, get_all=False
+        )
 
-        return await self.timeout(
+        if not shadow_root:
+            return None
+
+        shadow_root = shadow_root.shadow_root
+
+        out = await self.timeout(
             func=lambda: self.search_shadow_root(
                 shadow_root=shadow_root,
                 elem_css_selector=elem_css_selector,
@@ -257,6 +305,12 @@ class _SeleniumExtended:
             ),
             timeout=timeout,
         )
+
+        if isinstance(out, list):
+            return [ExtendedWebElement(elem) for elem in out]
+        elif isinstance(out, WebElement):
+            return ExtendedWebElement(out)
+        return out
 
     @overload
     def search_shadow_root(
@@ -428,92 +482,46 @@ class _SeleniumExtended:
                 self.close()
             self.switch_to.window(original_window)
 
+    @asynccontextmanager
+    async def react(self):
+        """Simulates human reaction time around an interaction."""
+        # pre-reaction
 
-class SeleniumExtendedFirefox(Firefox, _SeleniumExtended):
+        # create a random interaction, gaussian distributed around the mean reaction time
+        await self.sleep(abs(gauss(self._MEAN_REACTION_TIME, 0.5)))
 
-    def __init__(
-        self,
-        headless: bool = False,
-        user_agent: str | None = None,
-        firefox_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        """Extended Firefox driver.
-
-        Args:
-            headless (bool, optional): Whether to run headless. Defaults to False.
-            user_agent (str | None, optional): The user agent to use. Defaults to None.
-            firefox_kwargs (dict[str, Any] | None, optional): Additional geckodriver
-                keyword arguments. Defaults to None.
-        """
-        if firefox_kwargs is None:
-            firefox_kwargs = {}
-
-        if "options" in firefox_kwargs:
-            options = firefox_kwargs["options"]
-        else:
-            options = FirefoxOptions()
-
-        if headless and "-headless" not in options.arguments:
-            options.add_argument("-headless")
-
-        if user_agent is not None:
-            if options.profile is None:
-                profile = FirefoxProfile()
-                options.profile = profile
-            options.profile.set_preference("general.useragent.override", user_agent)
-
-        firefox_kwargs["options"] = options
-
-        Firefox.__init__(self, **firefox_kwargs)
-        _SeleniumExtended.__init__(self)
+        try:
+            # action
+            yield
+        finally:
+            # post-reaction
+            # save the time after the yielded interaction
+            self.last_interaction = time()
 
 
-class SeleniumExtendedChrome(Chrome, _SeleniumExtended):
+class ExtendedWebElement(WebElement):
 
-    def __init__(
-        self,
-        headless: bool = False,
-        user_agent: str | None = None,
-        chrome_kwargs: dict | None = None,
-    ) -> None:
-        """Extended Chrome driver.
+    def __init__(self, web_element: WebElement) -> None:
+        """WebElement with extended functionality.
 
         Args:
-            headless (bool, optional): Whether to run headless. Defaults to False.
-            user_agent (str | None, optional): The user agent to use. Defaults to None.
-            chrome_kwargs (dict[str, Any] | None, optional): Additional chromedriver
-                keyword arguments. Defaults to None.
+            web_element (WebElement): The WebElement to convert.
         """
-        if chrome_kwargs is None:
-            chrome_kwargs = {}
-        if "options" in chrome_kwargs:
-            options = chrome_kwargs["options"]
-        else:
-            options = ChromeOptions()
+        super().__init__(web_element.parent, web_element.id)
 
-        if headless:
-            if hl_index := next(
-                i for i, v in enumerate(options.arguments) if v.startswith("--headless")
-            ):
-                options.arguments.pop(hl_index)
-            options.add_argument("--headless=new")
+    @property
+    def parent(self) -> _SeleniumExtended:
+        return super().parent
 
-        if user_agent is not None:
-            if ua_index := next(
-                (
-                    i
-                    for i, v in enumerate(options.arguments)
-                    if v.startswith("--user-agent")
-                ),
-                None,
-            ):
-                options.arguments.pop(ua_index)
-            options.add_argument(f"--user-agent={user_agent}")
+    async def click_humanoid(self) -> None:
+        async with self.parent.react():
+            return super().click()
 
-        chrome_kwargs["options"] = options
-
-        Chrome.__init__(self, **chrome_kwargs)
-        _SeleniumExtended.__init__(self)
-
-
-ExtendedSeleniumDriver = Union[SeleniumExtendedChrome, SeleniumExtendedFirefox]
+    def send_keys_humanoid(self, *value: str) -> None:
+        for val in value:
+            for key in val:
+                super().send_keys(key)
+                # simulate typing delay
+                # we add a random delay from the exponential distribution
+                # with mean = 0.1 and lambda = 1/mean
+                sleep_sync(self.parent._MINIMUM_TYPING_DELAY + expovariate(1 / 0.015))
