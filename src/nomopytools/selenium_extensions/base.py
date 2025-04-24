@@ -429,6 +429,26 @@ class _SeleniumExtended:
             await sleep_async(seconds)
 
     @contextmanager
+    def wait_for_url_change(self, timeout: int = 10):
+        """Wait for url change after context.
+
+        Args:
+            timeout (int, optional): Timeout for waiting. Defaults to 10.
+
+
+        Yields:
+            str: The entering window's url.
+        """
+        current_url = self.current_url
+
+        try:
+            yield current_url
+        finally:
+            WebDriverWait(self, timeout).until(
+                lambda driver: driver.current_url != current_url
+            )
+
+    @contextmanager
     def maintain_window(self, window: str | None = None):
         """Assure the entering window is maintained on exit.
 
