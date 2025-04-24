@@ -43,9 +43,9 @@ T = TypeVar("T")
 class _SeleniumExtended:
 
     _MEAN_REACTION_TIME = 1.5
-    """Mean reaction time for humanoid reaction behavior."""
+    """Mean reaction time for humanoid reaction behavior in seconds."""
     _MINIMUM_TYPING_DELAY = 0.035
-    """Minimum delay between typing characters for humanoid typing behavior."""
+    """Minimum delay between typing characters for humanoid typing behavior in seconds."""
 
     def __init__(self) -> None:
         """Extended Selenium Driver Superclass."""
@@ -371,16 +371,6 @@ class _SeleniumExtended:
             await self.sleep(1)
         return result
 
-    # async def get_elem_xp_tree_async(
-    #     self, xpath: str, timeout: int | None = None, wait: int = 1, soup: bool = False
-    # ) -> list:
-    #     t1 = time()
-    #     while not (elem := (self.get_xp_tree(soup=soup)).xpath(xpath)):
-    #         if timeout and (time() - t1 >= timeout):
-    #             raise SeleniumTimeout
-    #         await self.sleep(wait)
-    #     return elem
-
     async def get_retry(self, url: str, wait: float = 30, retries: int = 6) -> None:
         """Access a url with retry.
 
@@ -447,7 +437,7 @@ class _SeleniumExtended:
                 If None, won't switch. Defaults to None.
 
         Yields:
-            _type_: The entering window's handle.
+            str: The entering window's handle.
         """
         original_window = self.current_window_handle
         if window:
@@ -469,7 +459,7 @@ class _SeleniumExtended:
                 Defaults to False.
 
         Yields:
-            _type_: The new window's handle.
+            str: The new window's handle.
         """
         original_window = self.current_window_handle
         self.switch_to.new_window(typ)
