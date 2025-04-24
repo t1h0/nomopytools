@@ -5,6 +5,7 @@ from lxml.etree import (
     HTMLParser as etreeHTMLParser,
 )
 from bs4 import BeautifulSoup
+from selenium.webdriver.support.select import Select
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.expected_conditions import (
     D,
@@ -535,3 +536,31 @@ class ExtendedWebElement(WebElement):
                 # we add a random delay from the exponential distribution
                 # with mean = 0.1 and lambda = 1/mean
                 sleep_sync(self.parent._MINIMUM_TYPING_DELAY + expovariate(1 / 0.015))
+
+    def select(
+        self,
+        value: str | None = None,
+        visible_text: str | None = None,
+        index: int | None = None,
+    ) -> None:
+        """Select an option of the element (self needs to be a select element)
+        by value, visible text or index. Exactly one of value, visible_text or index
+        must be set.
+
+        Args:
+            value (str | None, optional): Value to select. Defaults to None.
+            visible_text (str | None, optional): Visible text to select. Defaults to None.
+            index (int | None, optional): Index to select. Defaults to None.
+
+        Raises:
+            ValueError: If not exactly one of value, visible_text or index is set.
+        """
+        if sum(i is not None for i in (value, visible_text, index)) != 1:
+            raise ValueError("Exactly one of value, visible_text, index must be set.")
+
+        if value is not None:
+            return Select(self).select_by_value(value)
+        if visible_text is not None:
+            return Select(self).select_by_visible_text(visible_text)
+        if index is not None:
+            return Select(self).select_by_index(index)
